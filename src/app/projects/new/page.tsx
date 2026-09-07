@@ -23,6 +23,7 @@ function NewProjectContent() {
 
   const [projectName, setProjectName] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  const [selectedClip, setSelectedClip] = useState<{ name: string; url: string; thumbnail: string; duration: number } | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -72,6 +73,7 @@ function NewProjectContent() {
 
   const handleSelectedFile = (selectedFile: File) => {
     setError(null);
+    setSelectedClip(null);
     const validTypes = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo', 'video/mov'];
     const hasValidExt = selectedFile.name.match(/\.(mp4|webm|mov|avi)$/i);
 
@@ -93,7 +95,7 @@ function NewProjectContent() {
   };
 
   const handleUploadAndProceed = async () => {
-    if (!file && !projectName) {
+    if (!file && !projectName && !selectedClip) {
       setError('Please select or upload a video file and name your project.');
       return;
     }
@@ -102,9 +104,9 @@ function NewProjectContent() {
     setProgress(15);
 
     try {
-      let videoUrl = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
-      let duration = 30.0;
-      let thumbnailUrl = 'https://images.unsplash.com/photo-1574717024653-61fd2cf4d44d?w=600&auto=format&fit=crop&q=80';
+      let videoUrl = selectedClip?.url || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+      let duration = selectedClip?.duration || 30.0;
+      let thumbnailUrl = selectedClip?.thumbnail || 'https://images.unsplash.com/photo-1574717024653-61fd2cf4d44d?w=600&auto=format&fit=crop&q=80';
 
       if (file) {
         const formData = new FormData();
@@ -117,7 +119,7 @@ function NewProjectContent() {
         });
 
         if (!uploadRes.ok) {
-          const errData = await uploadRes.json();
+          const errData = await uploadRes.json().catch(() => ({}));
           throw new Error(errData.error || 'Upload failed');
         }
 
@@ -134,7 +136,7 @@ function NewProjectContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: projectName || 'Untitled AI Project',
+          title: projectName.trim() || selectedClip?.name || 'Untitled AI Project',
           originalVideoUrl: videoUrl,
           thumbnailUrl,
           duration,
@@ -143,7 +145,11 @@ function NewProjectContent() {
       });
 
       if (!createRes.ok) {
-        throw new Error('Failed to create project in database');
+        const errData = await createRes.json().catch(() => ({}));
+        const detailMsg = errData.details
+          ? Object.entries(errData.details).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`).join(', ')
+          : '';
+        throw new Error(errData.error ? `${errData.error}${detailMsg ? ' (' + detailMsg + ')' : ''}` : 'Failed to create project in database');
       }
 
       const projectData = await createRes.json();
@@ -160,6 +166,7 @@ function NewProjectContent() {
   };
 
   const handleSelectSampleClip = (clip: (typeof sampleClips)[0]) => {
+    setSelectedClip(clip);
     setProjectName(clip.name);
     setFile(null);
     toast.info(`Selected sample clip: ${clip.name}`);
@@ -256,25 +263,33 @@ function NewProjectContent() {
               Or test with pre-loaded royalty-free footage:
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {sampleClips.map((clip, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => handleSelectSampleClip(clip)}
-                  className="p-3 rounded-2xl glass-panel border border-white/[0.08] hover:border-purple-500/50 transition-all text-left flex gap-3 items-center group"
-                >
-                  <div className="w-14 h-12 rounded-xl bg-black/40 overflow-hidden relative flex-shrink-0">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={clip.thumbnail} alt={clip.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                  </div>
-                  <div className="overflow-hidden">
-                    <p className="text-xs font-bold text-white truncate">{clip.name}</p>
-                    <span className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
-                      <Clock className="w-2.5 h-2.5 text-cyan-400" /> {clip.duration}s
-                    </span>
-                  </div>
-                </button>
-              ))}
+              {sampleClips.map((clip, idx) => {
+                const isSelected = selectedClip?.name === clip.name;
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => handleSelectSampleClip(clip)}
+                    className={`p-3 rounded-2xl glass-panel border transition-all text-left flex gap-3 items-center group relative ${
+                      isSelected
+                        ? 'border-cyan-400 bg-cyan-950/30 ring-1 ring-cyan-400 shadow-lg shadow-cyan-500/10'
+                        : 'border-white/[0.08] hover:border-purple-500/50'
+                    }`}
+                  >
+                    <div className="w-14 h-12 rounded-xl bg-black/40 overflow-hidden relative flex-shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={clip.thumbnail} alt={clip.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                    </div>
+                    <div className="overflow-hidden">
+                      <p className={`text-xs font-bold truncate ${isSelected ? 'text-cyan-300' : 'text-white'}`}>{clip.name}</p>
+                      <span className="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">
+                        <Clock className="w-2.5 h-2.5 text-cyan-400" /> {clip.duration}s
+                        {isSelected && <span className="text-[10px] text-emerald-400 font-semibold ml-1">● Selected</span>}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
