@@ -1,0 +1,81 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String         @id @default(uuid())
+  name         String
+  email        String         @unique
+  passwordHash String
+  avatar       String?
+  createdAt    DateTime       @default(now())
+  projects     Project[]
+  activities   UserActivity[]
+}
+
+model Project {
+  id               String      @id @default(uuid())
+  userId           String
+  user             User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title            String
+  originalVideoUrl String
+  thumbnailUrl     String?
+  duration         Float       @default(0) // duration in seconds
+  status           String      @default("ready") // ready, processing, completed, error
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  editJobs         EditJob[]
+  subtitles        Subtitle[]
+}
+
+model EditJob {
+  id              String   @id @default(uuid())
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  mode            String   // auto, manual, assistant
+  instructions    String?  // user prompts or auto edit specifications
+  operations      String?  // JSON stringified operations array
+  status          String   @default("queued") // queued, processing, completed, failed
+  progress        Int      @default(0) // 0 to 100
+  outputVideoUrl  String?
+  errorMessage    String?
+  createdAt       DateTime @default(now())
+}
+
+model Subtitle {
+  id          String   @id @default(uuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  language    String   @default("en")
+  subtitleUrl String?
+  content     String?  // WebVTT or SRT text content
+  createdAt   DateTime @default(now())
+}
+
+model MusicTrack {
+  id          String   @id @default(uuid())
+  title       String
+  artist      String
+  genre       String   // soft, upbeat, cinematic, energetic, corporate, chill
+  duration    Float    // duration in seconds
+  audioUrl    String
+  previewUrl  String?
+  createdAt   DateTime @default(now())
+}
+
+model UserActivity {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action    String   // e.g. "PROJECT_CREATED", "AUTO_EDIT_STARTED", "VIDEO_EXPORTED"
+  metadata  String?  // JSON stringified metadata
+  createdAt DateTime @default(now())
+}
