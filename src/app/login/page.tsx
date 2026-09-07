@@ -24,14 +24,18 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
 
-      const data = await res.json();
-
       if (!res.ok) {
-        toast.error(data.error || 'Failed to sign in');
+        let errMsg = 'Failed to sign in';
+        try {
+          const errData = await res.json();
+          errMsg = errData.error || errMsg;
+        } catch {}
+        toast.error(errMsg);
         setLoading(false);
         return;
       }
 
+      const data = await res.json();
       toast.success('Welcome back, ' + data.user.name);
       router.push('/dashboard');
     } catch {

@@ -91,9 +91,9 @@ export default function ManualStudioPage() {
 
   useEffect(() => {
     fetch(`/api/projects/${projectId}`)
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data.project) {
+        if (data?.project) {
           setProject(data.project);
           if (data.project.duration) {
             setDuration(data.project.duration);
@@ -105,9 +105,9 @@ export default function ManualStudioPage() {
       .catch(() => setLoading(false));
 
     fetch('/api/music')
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data.tracks) setMusicTracks(data.tracks);
+        if (data?.tracks) setMusicTracks(data.tracks);
       })
       .catch(() => {});
   }, [projectId]);

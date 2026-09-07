@@ -63,7 +63,9 @@ Return valid JSON ONLY with this exact structure:
 
       if (response.ok) {
         const data = await response.json();
-        const parsed = JSON.parse(data.choices[0].message.content);
+        let rawContent = data.choices[0].message.content || '{}';
+        rawContent = rawContent.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
+        const parsed = JSON.parse(rawContent);
         return parsed;
       }
     } catch (err) {

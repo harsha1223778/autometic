@@ -25,14 +25,18 @@ export default function RegisterPage() {
         body: JSON.stringify({ name, email, password }),
       });
 
-      const data = await res.json();
-
       if (!res.ok) {
-        toast.error(data.error || 'Failed to create account');
+        let errMsg = 'Failed to create account';
+        try {
+          const errData = await res.json();
+          errMsg = errData.error || errMsg;
+        } catch {}
+        toast.error(errMsg);
         setLoading(false);
         return;
       }
 
+      const data = await res.json();
       toast.success('Account created! Welcome to EditFlow AI.');
       router.push('/dashboard');
     } catch {

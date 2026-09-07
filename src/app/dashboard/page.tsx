@@ -50,9 +50,9 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetch('/api/projects')
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((data) => {
-        setProjects(data.projects || []);
+        setProjects(data?.projects || []);
         setLoadingProjects(false);
       })
       .catch(() => {

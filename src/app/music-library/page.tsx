@@ -28,9 +28,9 @@ export default function MusicLibraryPage() {
 
   useEffect(() => {
     fetch(`/api/music${selectedGenre !== 'all' ? `?genre=${selectedGenre}` : ''}`)
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((data) => {
-        setTracks(data.tracks || []);
+        setTracks(data?.tracks || []);
         setLoading(false);
       })
       .catch(() => setLoading(false));

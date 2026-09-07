@@ -117,9 +117,9 @@ export default function AIAssistantPage() {
 
   useEffect(() => {
     fetch(`/api/projects/${projectId}`)
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data.project) setProject(data.project);
+        if (data?.project) setProject(data.project);
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -156,8 +156,16 @@ export default function AIAssistantPage() {
         }),
       });
 
+      if (!res.ok) {
+        let errMsg = 'AI generation failed';
+        try {
+          const errData = await res.json();
+          errMsg = errData.error || errMsg;
+        } catch {}
+        throw new Error(errMsg);
+      }
+
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'AI generation failed');
 
       // Map operation icons
       const mappedOps = (data.plan.operations || []).map((op: any, i: number) => {

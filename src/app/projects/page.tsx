@@ -47,9 +47,9 @@ export default function ProjectsPage() {
     if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter);
 
     fetch(`/api/projects?${params.toString()}`)
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((data) => {
-        setProjects(data.projects || []);
+        setProjects(data?.projects || []);
         setLoading(false);
       })
       .catch(() => setLoading(false));

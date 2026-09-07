@@ -26,9 +26,9 @@ export default function SelectModePage() {
 
   useEffect(() => {
     fetch(`/api/projects/${projectId}`)
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data.project) setProject(data.project);
+        if (data?.project) setProject(data.project);
         setLoading(false);
       })
       .catch(() => setLoading(false));
