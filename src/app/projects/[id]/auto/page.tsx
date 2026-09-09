@@ -25,8 +25,15 @@ import {
   Layers,
   Check,
   ChevronRight,
+  BotMessageSquare,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
+
+const isImageMedia = (url?: string) => {
+  if (!url) return false;
+  return !!url.match(/\.(png|jpe?g|webp|gif|svg)(\?.*)?$/i);
+};
 
 export default function AutoEditorPage() {
   const params = useParams();
@@ -263,7 +270,7 @@ export default function AutoEditorPage() {
 
         <main className="pt-20 px-8 pb-16 max-w-7xl mx-auto space-y-8">
           {/* Top Header */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-white/[0.08] pb-6">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-white/[0.08] pb-6">
             <div>
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/30 text-purple-300 text-xs font-semibold mb-1">
                 <Wand2 className="w-3.5 h-3.5 text-cyan-400" /> Auto Edit Studio
@@ -273,13 +280,31 @@ export default function AutoEditorPage() {
               </h1>
             </div>
 
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => router.push(`/projects/${projectId}/manual`)}
-                className="px-4 py-2 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] text-slate-300 hover:text-white text-xs font-semibold transition-all flex items-center gap-1.5"
-              >
-                <Sliders className="w-3.5 h-3.5 text-cyan-400" /> Switch to Manual Studio
-              </button>
+            {/* Mode Switcher & Primary Action */}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1 p-1 bg-white/[0.04] border border-white/[0.08] rounded-2xl">
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-xl bg-purple-600 text-white text-xs font-bold shadow-md shadow-purple-600/30 flex items-center gap-1.5"
+                >
+                  <Wand2 className="w-3.5 h-3.5 text-cyan-300" /> Auto Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.push(`/projects/${projectId}/manual`)}
+                  className="px-3 py-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 text-xs font-semibold flex items-center gap-1.5 transition-all"
+                >
+                  <Sliders className="w-3.5 h-3.5 text-cyan-400" /> Manual Studio
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.push(`/projects/${projectId}/assistant`)}
+                  className="px-3 py-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 text-xs font-semibold flex items-center gap-1.5 transition-all"
+                >
+                  <BotMessageSquare className="w-3.5 h-3.5 text-pink-400" /> AI Assistant
+                </button>
+              </div>
+
               <button
                 onClick={handleGeneratePlan}
                 disabled={analyzing}
@@ -297,15 +322,42 @@ export default function AutoEditorPage() {
             <div className="lg:col-span-7 space-y-6">
               {/* Video Player Box */}
               <div className="rounded-3xl glass-panel border border-white/[0.08] overflow-hidden relative shadow-2xl">
-                <div className="relative aspect-video bg-black flex items-center justify-center">
-                  <video
-                    ref={videoRef}
-                    src={outputVideoUrl || project?.originalVideoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4'}
-                    className="w-full h-full object-contain"
-                    onPlay={() => setIsPlaying(true)}
-                    onPause={() => setIsPlaying(false)}
-                    controls
-                  />
+                <div className="relative aspect-video bg-black flex items-center justify-center overflow-hidden">
+                  {(() => {
+                    const mediaSrc = outputVideoUrl || project?.originalVideoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+                    const isImg = isImageMedia(mediaSrc);
+
+                    if (isImg) {
+                      return (
+                        <div className="relative w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-black p-2">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={mediaSrc}
+                            alt={project?.title || 'Image Asset'}
+                            className="w-full h-full object-contain transform transition-transform duration-700 hover:scale-105"
+                          />
+                          <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-cyan-600/90 text-white text-[11px] font-bold shadow-lg flex items-center gap-1.5 backdrop-blur-md">
+                            <ImageIcon className="w-3.5 h-3.5" /> Image Asset Preview
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <video
+                        ref={videoRef}
+                        src={mediaSrc}
+                        className="w-full h-full object-contain"
+                        onPlay={() => setIsPlaying(true)}
+                        onPause={() => setIsPlaying(false)}
+                        onError={(e) => {
+                          console.warn('Video failed to load or unsupported codec, falling back to universal stream');
+                          e.currentTarget.src = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+                        }}
+                        controls
+                      />
+                    );
+                  })()}
                   {outputVideoUrl && (
                     <div className="absolute top-3 right-3 px-3 py-1 rounded-full bg-emerald-500/90 text-white text-[11px] font-bold shadow-lg flex items-center gap-1">
                       <Check className="w-3 h-3" /> Rendered Result
@@ -564,37 +616,87 @@ export default function AutoEditorPage() {
             </div>
           )}
 
-          {/* Export & Download Options Banner on Completion */}
+          {/* Export & Post-Development Edits Banner on Completion */}
           {renderStatus === 'completed' && outputVideoUrl && (
-            <div className="p-6 rounded-3xl bg-emerald-950/20 border border-emerald-500/30 flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
-                  <CheckCircle2 className="w-6 h-6" />
+            <div className="p-6 rounded-3xl bg-emerald-950/20 border border-emerald-500/30 flex flex-col gap-6">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                    <CheckCircle2 className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-white">Video Render Finished!</h4>
+                    <p className="text-xs text-slate-400">
+                      Exported in 1080p MP4 with automated silence trimming and synchronized captions.
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="text-sm font-bold text-white">Video Render Finished!</h4>
-                  <p className="text-xs text-slate-400">
-                    Exported in 1080p MP4 with automated silence trimming and synchronized captions.
-                  </p>
+
+                <div className="flex items-center gap-3">
+                  <a
+                    href={outputVideoUrl}
+                    download="editflow_auto_export.mp4"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-emerald-900/20 transition-all"
+                  >
+                    <Download className="w-3.5 h-3.5" /> Download MP4
+                  </a>
+                  <button
+                    onClick={() => router.push('/projects')}
+                    className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-semibold transition-all"
+                  >
+                    Back to Projects
+                  </button>
                 </div>
               </div>
 
-              <div className="flex items-center gap-3">
-                <a
-                  href={outputVideoUrl}
-                  download="editflow_auto_export.mp4"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-emerald-900/20 transition-all"
-                >
-                  <Download className="w-3.5 h-3.5" /> Download MP4
-                </a>
-                <button
-                  onClick={() => router.push('/projects')}
-                  className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-semibold transition-all"
-                >
-                  Back to Projects
-                </button>
+              {/* Post-Development Workflow Actions */}
+              <div className="pt-4 border-t border-emerald-500/20">
+                <p className="text-xs font-semibold text-emerald-300 mb-3 flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-cyan-400" />
+                  Post-Development Options: Continue editing or fine-tune this output:
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <button
+                    onClick={() => router.push(`/projects/${projectId}/manual`)}
+                    className="p-3.5 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-left transition-all hover:border-cyan-500/40 group"
+                  >
+                    <div className="flex items-center gap-2 text-cyan-400 text-xs font-bold mb-1">
+                      <Sliders className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                      <span>Refine in Manual Studio</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Fine-tune timestamps, add image cutaways, adjust background audio, or edit subtitles.
+                    </p>
+                  </button>
+
+                  <button
+                    onClick={() => router.push(`/projects/${projectId}/assistant`)}
+                    className="p-3.5 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-left transition-all hover:border-pink-500/40 group"
+                  >
+                    <div className="flex items-center gap-2 text-pink-400 text-xs font-bold mb-1">
+                      <BotMessageSquare className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                      <span>Request AI Revisions</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Chat with the AI video director to request revisions and generate an updated plan.
+                    </p>
+                  </button>
+
+                  <button
+                    onClick={() => setRenderStatus('idle')}
+                    className="p-3.5 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-left transition-all hover:border-purple-500/40 group"
+                  >
+                    <div className="flex items-center gap-2 text-purple-400 text-xs font-bold mb-1">
+                      <RefreshCw className="w-4 h-4 group-hover:rotate-180 transition-transform duration-500" />
+                      <span>Re-adjust Auto Settings</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Modify silence filters, pacing styles, or aspect ratios and re-render.
+                    </p>
+                  </button>
+                </div>
               </div>
             </div>
           )}

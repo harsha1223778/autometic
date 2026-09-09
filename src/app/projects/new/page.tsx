@@ -391,9 +391,18 @@ function NewProjectContent() {
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={item.previewUrl} alt={item.name} className="w-full h-full object-cover" />
                       ) : (
-                        <video src={item.previewUrl} className="w-full h-full object-cover" />
+                        <div className="w-full h-full relative">
+                          <video
+                            src={item.previewUrl}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+                          <FileVideo className="w-6 h-6 text-purple-400 absolute inset-0 m-auto -z-10" />
+                        </div>
                       )}
-                      <span className={`absolute top-1 left-1 text-[8px] font-extrabold uppercase px-1 rounded ${
+                      <span className={`absolute top-1 left-1 text-[8px] font-extrabold uppercase px-1 rounded z-10 ${
                         item.type === 'video' ? 'bg-purple-600 text-white' : 'bg-cyan-600 text-white'
                       }`}>
                         {item.type}

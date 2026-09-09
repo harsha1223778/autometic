@@ -30,8 +30,15 @@ import {
   Film,
   Plus,
   UploadCloud,
+  Wand2,
+  BotMessageSquare,
 } from 'lucide-react';
 import { toast } from 'sonner';
+
+const isImageMedia = (url?: string) => {
+  if (!url) return false;
+  return !!url.match(/\.(png|jpe?g|webp|gif|svg)(\?.*)?$/i);
+};
 
 interface EditOperation {
   id: string;
@@ -361,6 +368,30 @@ export default function ManualStudioPage() {
               Manual Studio
             </span>
           </div>
+        </div>
+
+        {/* Mode Switcher Navigation */}
+        <div className="hidden sm:flex items-center gap-1 p-1 bg-white/[0.04] border border-white/[0.08] rounded-xl">
+          <button
+            type="button"
+            onClick={() => router.push(`/projects/${projectId}/auto`)}
+            className="px-2.5 py-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 text-xs font-semibold flex items-center gap-1.5 transition-all"
+          >
+            <Wand2 className="w-3.5 h-3.5 text-purple-400" /> Auto Edit
+          </button>
+          <button
+            type="button"
+            className="px-2.5 py-1 rounded-lg bg-cyan-600 text-white text-xs font-bold shadow-sm flex items-center gap-1.5"
+          >
+            <Sliders className="w-3.5 h-3.5" /> Manual Studio
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push(`/projects/${projectId}/assistant`)}
+            className="px-2.5 py-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 text-xs font-semibold flex items-center gap-1.5 transition-all"
+          >
+            <BotMessageSquare className="w-3.5 h-3.5 text-pink-400" /> AI Assistant
+          </button>
         </div>
 
         {/* Undo/Redo & Save Actions */}
@@ -825,18 +856,46 @@ export default function ManualStudioPage() {
                   : 'w-full max-w-3xl aspect-video'
               }`}
             >
-              <video
-                ref={videoRef}
-                src={project?.originalVideoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4'}
-                className="w-full h-full object-contain"
-                style={{ filter: filterStyles[selectedFilter] }}
-                onTimeUpdate={() => {
-                  if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
-                }}
-                onLoadedMetadata={() => {
-                  if (videoRef.current) setDuration(videoRef.current.duration);
-                }}
-              />
+              {(() => {
+                const mediaSrc = project?.originalVideoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+                const isImg = isImageMedia(mediaSrc);
+
+                if (isImg) {
+                  return (
+                    <div className="relative w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-black p-2">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={mediaSrc}
+                        alt={project?.title || 'Canvas Asset'}
+                        className="w-full h-full object-contain"
+                        style={{ filter: filterStyles[selectedFilter] }}
+                      />
+                      <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-cyan-600/90 text-white text-[11px] font-bold shadow-lg flex items-center gap-1.5 backdrop-blur-md">
+                        <ImageIcon className="w-3.5 h-3.5" /> Image Asset Preview
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <video
+                    ref={videoRef}
+                    src={mediaSrc}
+                    className="w-full h-full object-contain"
+                    style={{ filter: filterStyles[selectedFilter] }}
+                    onTimeUpdate={() => {
+                      if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
+                    }}
+                    onLoadedMetadata={() => {
+                      if (videoRef.current) setDuration(videoRef.current.duration);
+                    }}
+                    onError={(e) => {
+                      console.warn('Video failed to load or unsupported codec, falling back to universal stream');
+                      e.currentTarget.src = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+                    }}
+                  />
+                );
+              })()}
 
               {/* In-Video Burnt Subtitle Overlay Preview */}
               {subtitleText && (
@@ -899,7 +958,16 @@ export default function ManualStudioPage() {
                         key={op.id}
                         className="absolute top-4 left-4 z-20 w-48 aspect-video rounded-xl overflow-hidden shadow-2xl border-2 border-purple-500/80 bg-black pointer-events-none transition-all duration-200 animate-in fade-in"
                       >
-                        <video src={op.details.url} autoPlay muted loop className="w-full h-full object-cover" />
+                        <video
+                          src={op.details.url}
+                          autoPlay
+                          muted
+                          loop
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            e.currentTarget.src = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+                          }}
+                        />
                         <span className="absolute bottom-1 left-1 text-[8px] font-extrabold bg-purple-600 text-white px-1.5 py-0.5 rounded shadow">
                           B-ROLL CUTAWAY
                         </span>

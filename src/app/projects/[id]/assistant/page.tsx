@@ -23,6 +23,8 @@ import {
   Clock,
   Play,
   Share2,
+  Wand2,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -271,7 +273,7 @@ export default function AIAssistantPage() {
 
         <main className="pt-20 px-8 pb-16 max-w-7xl mx-auto space-y-6">
           {/* Header */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-white/[0.08] pb-4">
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-white/[0.08] pb-4">
             <div>
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-pink-500/10 border border-pink-500/30 text-pink-300 text-xs font-semibold mb-1">
                 <BotMessageSquare className="w-3.5 h-3.5 text-pink-400" /> AI Video Assistant
@@ -281,15 +283,40 @@ export default function AIAssistantPage() {
               </h1>
             </div>
 
-            {/* Video Context Badge */}
-            {project && (
-              <div className="px-3.5 py-1.5 rounded-xl glass-panel border border-white/10 flex items-center gap-2.5 text-xs text-slate-300">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="font-semibold text-white">{project.title}</span>
-                <span className="text-slate-500">•</span>
-                <span className="text-slate-400 font-mono">{Math.round(project.duration || 30)}s</span>
+            {/* Mode Switcher & Media Context Badge */}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-1 p-1 bg-white/[0.04] border border-white/[0.08] rounded-2xl">
+                <button
+                  type="button"
+                  onClick={() => router.push(`/projects/${projectId}/auto`)}
+                  className="px-3 py-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 text-xs font-semibold flex items-center gap-1.5 transition-all"
+                >
+                  <Wand2 className="w-3.5 h-3.5 text-purple-400" /> Auto Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.push(`/projects/${projectId}/manual`)}
+                  className="px-3 py-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 text-xs font-semibold flex items-center gap-1.5 transition-all"
+                >
+                  <Sliders className="w-3.5 h-3.5 text-cyan-400" /> Manual Studio
+                </button>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-xl bg-pink-600 text-white text-xs font-bold shadow-md shadow-pink-600/30 flex items-center gap-1.5"
+                >
+                  <BotMessageSquare className="w-3.5 h-3.5" /> AI Assistant
+                </button>
               </div>
-            )}
+
+              {project && (
+                <div className="px-3.5 py-1.5 rounded-xl glass-panel border border-white/10 flex items-center gap-2.5 text-xs text-slate-300">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="font-semibold text-white truncate max-w-[140px]">{project.title}</span>
+                  <span className="text-slate-500">•</span>
+                  <span className="text-slate-400 font-mono">{Math.round(project.duration || 30)}s</span>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* 2-Column Split: Conversational Chat & Generated Plan Card Deck */}

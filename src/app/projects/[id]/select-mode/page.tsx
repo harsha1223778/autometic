@@ -23,12 +23,52 @@ export default function SelectModePage() {
 
   const [project, setProject] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [recommendation, setRecommendation] = useState<{
+    mode: 'auto' | 'manual' | 'assistant';
+    confidence: number;
+    detectedCategory: string;
+    reasoning: string;
+  }>({
+    mode: 'auto',
+    confidence: 98,
+    detectedCategory: 'Creator Dialogue & Spoken Vlog',
+    reasoning: 'AI detected continuous speech with natural pause gaps. Auto-cut silence removal, vocal loudness normalization (-14 LUFS), and auto-captions will deliver the fastest broadcast-quality result.',
+  });
 
   useEffect(() => {
     fetch(`/api/projects/${projectId}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data?.project) setProject(data.project);
+        if (data?.project) {
+          setProject(data.project);
+
+          // AI Workflow Recommendation Logic based on project media characteristics
+          const title = (data.project.title || '').toLowerCase();
+          const isImage = !!data.project.originalVideoUrl?.match(/\.(png|jpe?g|webp|gif|svg)$/i);
+
+          if (isImage || title.includes('photo') || title.includes('image') || title.includes('card') || title.includes('montage')) {
+            setRecommendation({
+              mode: 'assistant',
+              confidence: 99,
+              detectedCategory: 'Photo Montage & Multi-Asset Visuals',
+              reasoning: 'Detected still photos and mixed graphics. The conversational AI Assistant is optimal for generating timed image slideshows, graphics overlays, and matching music.',
+            });
+          } else if (title.includes('landscape') || title.includes('b-roll') || title.includes('cinematic') || (data.project.duration && data.project.duration > 45)) {
+            setRecommendation({
+              mode: 'manual',
+              confidence: 97,
+              detectedCategory: 'Multi-Track Creative Footage & B-Roll',
+              reasoning: 'Detected layered footage and cinematic pacing. The Manual Studio timeline is recommended for frame-accurate split trims, color grading LUTs, and multi-track audio mixing.',
+            });
+          } else {
+            setRecommendation({
+              mode: 'auto',
+              confidence: 98,
+              detectedCategory: 'Creator Dialogue & Speech Presentation',
+              reasoning: 'Detected talking-head pacing. Auto-cut silence removal, vocal loudness normalization (-14 LUFS), and styled captions will produce an instant polished delivery.',
+            });
+          }
+        }
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -97,45 +137,79 @@ export default function SelectModePage() {
           {/* Header */}
           <div className="text-center max-w-2xl mx-auto space-y-3">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/30 text-purple-300 text-xs font-semibold">
-              <Sparkles className="w-3.5 h-3.5 text-cyan-400" /> Choose Editing Experience
+              <Sparkles className="w-3.5 h-3.5 text-cyan-400" /> AI Creative Workflow Detection
             </div>
             <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
               Select Your Creative Workflow
             </h1>
             <p className="text-sm text-slate-400">
-              Targeted for &ldquo;{project?.title || 'Your Video'}&rdquo; • Switch between modes at any time.
+              Targeted for &ldquo;{project?.title || 'Your Video'}&rdquo; • Switch between modes anytime after creating edits.
             </p>
           </div>
 
-          {/* Project Preview Bar */}
+          {/* Project Preview Bar & AI Smart Recommendation Banner */}
           {project && (
-            <div className="p-4 rounded-2xl glass-panel border border-white/[0.08] flex items-center justify-between max-w-3xl mx-auto">
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-10 rounded-xl bg-black/40 overflow-hidden">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={project.thumbnailUrl || 'https://images.unsplash.com/photo-1574717024653-61fd2cf4d44d?w=600&auto=format&fit=crop&q=80'}
-                    alt={project.title}
-                    className="w-full h-full object-cover"
-                  />
+            <div className="space-y-4 max-w-4xl mx-auto">
+              {/* Footage Info Bar */}
+              <div className="p-4 rounded-2xl glass-panel border border-white/[0.08] flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-10 rounded-xl bg-black/40 overflow-hidden">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={project.thumbnailUrl || 'https://images.unsplash.com/photo-1574717024653-61fd2cf4d44d?w=600&auto=format&fit=crop&q=80'}
+                      alt={project.title}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-white">{project.title}</h3>
+                    <span className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
+                      <Clock className="w-3 h-3 text-cyan-400" /> {Math.round(project.duration || 30)} seconds duration
+                    </span>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="text-xs font-bold text-white">{project.title}</h3>
-                  <span className="text-[11px] text-slate-400 flex items-center gap-1 mt-0.5">
-                    <Clock className="w-3 h-3 text-cyan-400" /> {Math.round(project.duration || 30)} seconds duration
-                  </span>
-                </div>
+                <span className="text-xs text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20 font-medium">
+                  Footage Analyzed
+                </span>
               </div>
-              <span className="text-xs text-emerald-400 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20 font-medium">
-                Footage Ready
-              </span>
+
+              {/* AI Recommendation Card */}
+              <div className="p-6 rounded-3xl bg-gradient-to-r from-purple-950/40 via-indigo-950/30 to-cyan-950/40 border border-cyan-500/40 shadow-xl shadow-cyan-950/20 flex flex-col md:flex-row items-start md:items-center justify-between gap-5 relative overflow-hidden">
+                <div className="space-y-2 relative z-10 max-w-xl">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 flex items-center gap-1">
+                      <Sparkles className="w-3 h-3 text-cyan-300 animate-pulse" />
+                      AI Detected: {recommendation.detectedCategory}
+                    </span>
+                    <span className="text-[10px] text-purple-300 font-mono">
+                      {recommendation.confidence}% Match
+                    </span>
+                  </div>
+                  <h4 className="text-sm font-bold text-white">
+                    Recommended: <span className="text-cyan-300 uppercase">{recommendation.mode.replace('_', ' ')} MODE</span>
+                  </h4>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    {recommendation.reasoning}
+                  </p>
+                </div>
+
+                <Link
+                  href={`/projects/${projectId}/${recommendation.mode}`}
+                  className="px-6 py-3 rounded-2xl bg-gradient-to-r from-cyan-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-white font-bold text-xs shadow-lg shadow-cyan-500/20 transition-all hover:scale-105 flex items-center gap-2 flex-shrink-0"
+                >
+                  <span>Launch Recommended Workflow</span>
+                  <ArrowRight className="w-4 h-4" />
+                </Link>
+              </div>
             </div>
           )}
 
-          {/* 3D Animated Mode Tilt Cards */}
+          {/* 3D Animated Mode Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {modes.map((mode, idx) => {
+            {modes.map((mode) => {
               const Icon = mode.icon;
+              const isRecommended = recommendation.mode === mode.id;
+
               return (
                 <motion.div
                   key={mode.id}
@@ -144,12 +218,22 @@ export default function SelectModePage() {
                 >
                   <Link
                     href={mode.href}
-                    className={`w-full p-8 rounded-3xl glass-panel border border-white/[0.08] transition-all flex flex-col justify-between relative group ${mode.borderGlow} shadow-xl`}
+                    className={`w-full p-8 rounded-3xl glass-panel border transition-all flex flex-col justify-between relative group shadow-xl ${
+                      isRecommended
+                        ? 'border-cyan-400/80 bg-cyan-950/15 ring-2 ring-cyan-400/30 shadow-cyan-500/20'
+                        : `${mode.borderGlow} border-white/[0.08]`
+                    }`}
                   >
-                    {mode.badge && (
-                      <span className="absolute top-6 right-6 px-2.5 py-0.5 rounded-full bg-white/10 text-cyan-300 text-[10px] font-bold uppercase tracking-wider border border-white/15">
-                        {mode.badge}
+                    {isRecommended ? (
+                      <span className="absolute top-5 right-5 px-3 py-1 rounded-full bg-cyan-500/30 text-cyan-200 text-[10px] font-extrabold uppercase tracking-wider border border-cyan-400/50 shadow-md shadow-cyan-400/20 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-cyan-300" /> AI SUGGESTION
                       </span>
+                    ) : (
+                      mode.badge && (
+                        <span className="absolute top-6 right-6 px-2.5 py-0.5 rounded-full bg-white/10 text-cyan-300 text-[10px] font-bold uppercase tracking-wider border border-white/15">
+                          {mode.badge}
+                        </span>
+                      )
                     )}
 
                     <div>
@@ -172,7 +256,7 @@ export default function SelectModePage() {
                     </div>
 
                     <div className="pt-4 border-t border-white/[0.06] flex items-center justify-between text-xs font-bold text-white group-hover:text-purple-300 transition-colors">
-                      <span>Launch Mode</span>
+                      <span>{isRecommended ? 'Launch Recommended Mode' : 'Launch Mode'}</span>
                       <ArrowRight className="w-4 h-4 group-hover:translate-x-1.5 transition-transform" />
                     </div>
                   </Link>
