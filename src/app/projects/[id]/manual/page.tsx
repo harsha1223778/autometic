@@ -56,6 +56,8 @@ import {
   Video as VideoIcon,
   Keyboard,
   SlidersHorizontal,
+  Smile,
+  Activity,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import KaraokeSubtitles from '@/components/studio/KaraokeSubtitles';
@@ -102,6 +104,17 @@ import {
   deleteProjectSnapshot,
   ProjectSnapshot,
 } from '@/lib/versionHistory';
+import AudioMixerModal from '@/components/studio/AudioMixerModal';
+import SocialPublisherModal from '@/components/studio/SocialPublisherModal';
+import { AudioMixerState, DEFAULT_MIXER_STATE } from '@/lib/audioMixer';
+import { KEN_BURNS_PRESETS, calculateSmartBRollCues } from '@/lib/kenBurns';
+import {
+  STICKER_LIBRARY,
+  ActiveSticker,
+  scanTranscriptForStickerTriggers,
+  StickerItem,
+} from '@/lib/stickerEngine';
+import { generateRetentionHeatmap, RetentionAnalysisReport } from '@/lib/retentionHeatmap';
 
 const isImageMedia = (url?: string) => {
   if (!url) return false;
@@ -140,7 +153,7 @@ export default function ManualStudioPage() {
   const [duration, setDuration] = useState(30);
 
   // Studio Tools & Properties State
-  const [activeTab, setActiveTab] = useState<'media' | 'stock' | 'sequence' | 'voice' | 'script' | 'sfx' | 'transitions' | 'callouts' | 'speed' | 'chroma' | 'coach' | 'seo' | 'reframe' | 'trim' | 'audio' | 'subtitles' | 'filters' | 'history'>('media');
+  const [activeTab, setActiveTab] = useState<'media' | 'stock' | 'sequence' | 'voice' | 'script' | 'sfx' | 'transitions' | 'callouts' | 'stickers' | 'retention' | 'speed' | 'chroma' | 'coach' | 'seo' | 'reframe' | 'trim' | 'audio' | 'subtitles' | 'filters' | 'history'>('media');
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
   const [selectedOverlayPosition, setSelectedOverlayPosition] = useState<'top-right' | 'center' | 'lower-third'>('top-right');
   const [overlayDuration, setOverlayDuration] = useState(4.0);
@@ -221,6 +234,25 @@ export default function ManualStudioPage() {
 
   // 14. Project Snapshots & Version History State
   const [snapshots, setSnapshots] = useState<ProjectSnapshot[]>([]);
+
+  // 15. Multi-Track Audio Mixer Console State
+  const [showAudioMixerModal, setShowAudioMixerModal] = useState(false);
+  const [mixerState, setMixerState] = useState<AudioMixerState>(DEFAULT_MIXER_STATE);
+
+  // 16. Social Launch Kit Modal State
+  const [showSocialModal, setShowSocialModal] = useState(false);
+
+  // 17. Motion Graphics Stickers & Emoji Popper State
+  const [selectedSticker, setSelectedSticker] = useState('fire');
+  const [stickerPosition, setStickerPosition] = useState<'top-left' | 'top-right' | 'center' | 'bottom-left' | 'bottom-right'>('top-right');
+  const [stickerAnimation, setStickerAnimation] = useState<'pop-bounce' | 'spin-in' | 'pulse-glow' | 'slide-up'>('pop-bounce');
+  const [stickerDuration, setStickerDuration] = useState(2.5);
+
+  // 18. Ken Burns Motion Presets State
+  const [selectedKenBurnsPreset, setSelectedKenBurnsPreset] = useState('zoom-in');
+
+  // 19. AI Audience Retention Graph & Heatmap State
+  const [retentionReport, setRetentionReport] = useState<RetentionAnalysisReport | null>(null);
 
   // Trim & Audio State
   const [trimStart, setTrimStart] = useState(0);
@@ -524,6 +556,65 @@ export default function ManualStudioPage() {
     deleteProjectSnapshot(projectId, snapshotId);
     setSnapshots(getProjectSnapshots(projectId));
     toast.info('Snapshot deleted');
+  };
+
+  // 17. Motion Graphics Stickers & Emoji Handlers
+  const handleInsertSticker = (item?: StickerItem) => {
+    const stickerItem = item || STICKER_LIBRARY.find((s) => s.id === selectedSticker) || STICKER_LIBRARY[0];
+    const start = parseFloat(currentTime.toFixed(1));
+    addOperation('sticker_emoji', `Sticker: ${stickerItem.emoji} ${stickerItem.label}`, {
+      stickerId: stickerItem.id,
+      emoji: stickerItem.emoji,
+      label: stickerItem.label,
+      startTime: start,
+      duration: stickerDuration,
+      position: stickerPosition,
+      animation: stickerAnimation,
+      size: 80,
+    });
+    toast.success(`Popped "${stickerItem.emoji}" sticker at ${formatTime(start)} (${stickerDuration}s)`);
+  };
+
+  const handleAutoScanStickers = () => {
+    const suggestions = scanTranscriptForStickerTriggers(subtitleText, duration);
+    if (suggestions.length === 0) {
+      toast.info('No direct keyword triggers found. Try adding stickers manually!');
+      return;
+    }
+    suggestions.forEach((match) => {
+      addOperation('sticker_emoji', `Sticker: ${match.sticker.emoji} ${match.sticker.label}`, {
+        stickerId: match.sticker.id,
+        emoji: match.sticker.emoji,
+        label: match.sticker.label,
+        startTime: match.timestamp,
+        duration: 2.5,
+        position: 'top-right',
+        animation: match.sticker.defaultAnimation,
+        size: 80,
+      });
+    });
+    toast.success(`AI automatically inserted ${suggestions.length} reaction stickers synced to key words!`);
+  };
+
+  // 18. Smart Ken Burns B-Roll Auto-Sync Handler
+  const handleAutoSyncBRollCues = () => {
+    const cues = calculateSmartBRollCues(subtitleText, duration, 4);
+    if (cues.length === 0) {
+      toast.info('Not enough speech content to calculate B-roll pauses');
+      return;
+    }
+    toast.success(`AI calculated ${cues.length} speech pauses for Ken Burns cutaways!`);
+  };
+
+  // 19. AI Retention Heatmap Analysis Handler
+  const handleRunRetentionAnalysis = () => {
+    const report = generateRetentionHeatmap({
+      duration,
+      operations,
+      hasSubtitles: Boolean(subtitleText && subtitleText.trim()),
+    });
+    setRetentionReport(report);
+    toast.success(`Audience Retention: ${report.overallRetentionScore}% projected retention score!`);
   };
 
   // Global NLE Keyboard Shortcuts Engine
@@ -995,6 +1086,20 @@ export default function ManualStudioPage() {
           position: op.details.position || 'bottom-left',
         }));
 
+      const activeStickers: ActiveSticker[] = operations
+        .filter((op) => op.type === 'sticker_emoji' && op.details)
+        .map((op) => ({
+          id: op.id,
+          stickerId: op.details.stickerId || 'fire',
+          emoji: op.details.emoji || '🔥',
+          label: op.details.label || '',
+          startTime: Number(op.details.startTime) || 0,
+          duration: Number(op.details.duration) || 2.5,
+          position: op.details.position || 'top-right',
+          animation: op.details.animation || 'pop-bounce',
+          size: op.details.size || 80,
+        }));
+
       const outputBlob = await renderStudioComposition({
         videoElement: isImg ? null : videoRef.current,
         imageSrc: isImg ? mediaSrc : null,
@@ -1016,6 +1121,7 @@ export default function ManualStudioPage() {
           : undefined,
         overlays: activeOverlays,
         callouts: activeCallouts,
+        stickers: activeStickers,
         musicUrl: musicTrack?.url || null,
         musicVolume: musicVolume / 100,
         onProgress: (pct, stage) => {
@@ -1159,6 +1265,22 @@ export default function ManualStudioPage() {
             <Keyboard className="w-3.5 h-3.5 text-amber-400" />
             <span className="hidden sm:inline">Hotkeys</span>
           </button>
+          <button
+            onClick={() => setShowAudioMixerModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 text-xs font-semibold text-cyan-300 border border-cyan-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+            title="Multi-Track Audio Mixer & Console"
+          >
+            <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden sm:inline">Mixer</span>
+          </button>
+          <button
+            onClick={() => setShowSocialModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 text-xs font-semibold text-purple-300 border border-purple-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+            title="1-Click Social Media Launch Kit & Subtitles"
+          >
+            <Share2 className="w-3.5 h-3.5 text-purple-400" />
+            <span className="hidden sm:inline">Social Kit</span>
+          </button>
           <div className="h-4 w-px bg-white/10 mx-1" />
           <button
             onClick={handleSaveDraft}
@@ -1209,6 +1331,8 @@ export default function ManualStudioPage() {
               { id: 'media', label: 'Media', icon: ImageIcon },
               { id: 'sequence', label: 'Multi-Clip', icon: Layers },
               { id: 'stock', label: 'B-Roll', icon: Flame },
+              { id: 'stickers', label: 'Stickers', icon: Smile },
+              { id: 'retention', label: 'Retention', icon: Activity },
               { id: 'callouts', label: 'Callouts', icon: AtSign },
               { id: 'filters', label: 'LUTs/Grading', icon: SlidersHorizontal },
               { id: 'script', label: 'Script', icon: FileText },
@@ -2640,6 +2764,252 @@ export default function ManualStudioPage() {
               </div>
             )}
 
+            {activeTab === 'stickers' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <Smile className="w-3.5 h-3.5 text-amber-400" /> Reaction Stickers & Emojis
+                  </h4>
+                  <span className="text-[10px] text-amber-300 font-mono font-semibold">
+                    {operations.filter((op) => op.type === 'sticker_emoji').length} Active
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleAutoScanStickers}
+                    className="flex-1 py-2 px-3 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" /> Auto-Scan Keywords
+                  </button>
+                </div>
+
+                {/* Sticker Library Grid */}
+                <div className="space-y-2">
+                  <label className="text-[11px] font-semibold text-slate-300">Select Sticker</label>
+                  <div className="grid grid-cols-4 gap-2 max-h-48 overflow-y-auto p-1 bg-black/30 rounded-xl border border-white/[0.06]">
+                    {STICKER_LIBRARY.map((item) => (
+                      <button
+                        key={item.id}
+                        onClick={() => {
+                          setSelectedSticker(item.id);
+                          setStickerAnimation(item.defaultAnimation);
+                        }}
+                        className={`p-2 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all ${
+                          selectedSticker === item.id
+                            ? 'bg-amber-500/25 border-amber-400 text-white shadow-md scale-105'
+                            : 'bg-white/[0.02] border-white/[0.06] text-slate-300 hover:bg-white/[0.05]'
+                        }`}
+                      >
+                        <span className="text-2xl">{item.emoji}</span>
+                        <span className="text-[9px] font-semibold truncate w-full text-center opacity-80">
+                          {item.label}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Animation & Position */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-300 block mb-1">Animation</label>
+                    <select
+                      value={stickerAnimation}
+                      onChange={(e) => setStickerAnimation(e.target.value as any)}
+                      className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none"
+                    >
+                      <option value="pop-bounce">Pop Bounce</option>
+                      <option value="spin-in">Spin In (360°)</option>
+                      <option value="pulse-glow">Pulse Glow</option>
+                      <option value="slide-up">Slide Up</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-300 block mb-1">Position</label>
+                    <select
+                      value={stickerPosition}
+                      onChange={(e) => setStickerPosition(e.target.value as any)}
+                      className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none"
+                    >
+                      <option value="top-right">Top Right</option>
+                      <option value="top-left">Top Left</option>
+                      <option value="center">Center Pop</option>
+                      <option value="bottom-right">Bottom Right</option>
+                      <option value="bottom-left">Bottom Left</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-xs text-slate-300">
+                    <span>Duration</span>
+                    <span className="font-mono text-amber-400">{stickerDuration}s</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={6}
+                    step={0.5}
+                    value={stickerDuration}
+                    onChange={(e) => setStickerDuration(parseFloat(e.target.value))}
+                    className="w-full accent-amber-500"
+                  />
+                </div>
+
+                {/* Insert Button */}
+                <button
+                  onClick={() => handleInsertSticker()}
+                  className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-xs font-bold text-white shadow-lg transition-all flex items-center justify-center gap-2"
+                >
+                  <Plus className="w-4 h-4" /> Insert Sticker at {formatTime(currentTime)}
+                </button>
+
+                {/* Active Stickers on Timeline */}
+                <div className="space-y-2 pt-2 border-t border-white/[0.08]">
+                  <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
+                    Stickers on Timeline
+                  </span>
+                  {operations.filter((op) => op.type === 'sticker_emoji').length === 0 ? (
+                    <p className="text-[11px] text-slate-500 italic">No stickers on timeline yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {operations
+                        .filter((op) => op.type === 'sticker_emoji')
+                        .map((op) => (
+                          <div
+                            key={op.id}
+                            className="p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.08] flex items-center justify-between text-xs"
+                          >
+                            <div className="truncate">
+                              <span className="font-semibold text-white truncate block">{op.name}</span>
+                              <span className="text-[10px] text-amber-400 font-mono">
+                                @ {formatTime(op.details?.startTime || 0)} ({op.details?.duration || 2.5}s)
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => handleRemoveOverlayOp(op.id)}
+                              className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                              title="Delete Sticker"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'retention' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-emerald-400" /> Retention Graph & Heatmap
+                  </h4>
+                  <button
+                    onClick={handleRunRetentionAnalysis}
+                    className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold underline"
+                  >
+                    Simulate
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  Predictive timeline heatmap detecting audience drop-off risk and boredom spikes.
+                </p>
+
+                {/* Big Score Card */}
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-950/30 to-[#0A0E1A] border border-emerald-500/30 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-300 font-medium">Projected Completion</span>
+                    <span className="text-2xl font-black font-mono text-emerald-400">
+                      {retentionReport ? `${retentionReport.overallRetentionScore}%` : '85%'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-center text-xs">
+                    <div className="p-2 rounded-xl bg-black/40 border border-white/5">
+                      <span className="text-[10px] text-slate-400 block">Avg Visual Pace</span>
+                      <span className="font-mono font-bold text-cyan-300">
+                        {retentionReport ? `${retentionReport.averagePaceInterval}s` : '2.8s'}
+                      </span>
+                    </div>
+                    <div className="p-2 rounded-xl bg-black/40 border border-white/5">
+                      <span className="text-[10px] text-slate-400 block">Boredom Spikes</span>
+                      <span className="font-mono font-bold text-amber-300">
+                        {retentionReport ? `${retentionReport.boredomGapsCount}` : '1 detected'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleRunRetentionAnalysis}
+                  className="w-full py-2.5 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-xs font-bold text-white shadow-lg transition-all flex items-center justify-center gap-2"
+                >
+                  <Activity className="w-4 h-4" /> Run Audience Retention Simulation
+                </button>
+
+                {/* Heatmap Legend */}
+                <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-2">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Timeline Color Key
+                  </span>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="flex items-center gap-1.5 text-emerald-400">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> High (75%+)
+                    </span>
+                    <span className="flex items-center gap-1.5 text-amber-400">
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> Medium (50-74%)
+                    </span>
+                    <span className="flex items-center gap-1.5 text-rose-400">
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-500" /> Churn Risk (&lt;50%)
+                    </span>
+                  </div>
+                </div>
+
+                {/* Actionable Recommendations */}
+                {retentionReport?.actions && retentionReport.actions.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t border-white/[0.08]">
+                    <span className="text-[11px] font-bold text-white uppercase tracking-wider block">
+                      Retention Fixes
+                    </span>
+                    <div className="space-y-2">
+                      {retentionReport.actions.map((act) => (
+                        <div
+                          key={act.id}
+                          className="p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.08] hover:border-emerald-500/40 transition-all space-y-1"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-bold text-xs text-white">{act.title}</span>
+                            <span className="text-[10px] font-mono text-cyan-400">
+                              @ {formatTime(act.timestamp)}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400">{act.description}</p>
+                          <button
+                            onClick={() => {
+                              if (videoRef.current) {
+                                videoRef.current.currentTime = act.timestamp;
+                                setCurrentTime(act.timestamp);
+                              }
+                              if (act.type === 'add_broll') setActiveTab('stock');
+                              if (act.type === 'add_sticker') setActiveTab('stickers');
+                              if (act.type === 'add_sfx') setActiveTab('sfx');
+                            }}
+                            className="text-[10px] font-bold text-emerald-400 hover:underline pt-1 block"
+                          >
+                            Jump to Playhead & Fix →
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {activeTab === 'callouts' && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
@@ -3235,6 +3605,46 @@ export default function ManualStudioPage() {
                     </div>
                   );
                 })}
+
+              {/* Active Reaction Stickers & Emojis Preview Overlay */}
+              {operations
+                .filter((op) => op.type === 'sticker_emoji' && op.details)
+                .filter(
+                  (op) =>
+                    currentTime >= Number(op.details.startTime) &&
+                    currentTime <= Number(op.details.startTime) + Number(op.details.duration)
+                )
+                .map((op) => {
+                  const pos = op.details.position || 'top-right';
+                  const posClasses =
+                    pos === 'top-left'
+                      ? 'top-8 left-8'
+                      : pos === 'top-right'
+                      ? 'top-8 right-8'
+                      : pos === 'center'
+                      ? 'top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2'
+                      : pos === 'bottom-left'
+                      ? 'bottom-20 left-8'
+                      : 'bottom-20 right-8';
+
+                  return (
+                    <div
+                      key={op.id}
+                      className={`absolute z-30 pointer-events-none transition-all duration-300 animate-in zoom-in-50 ${posClasses}`}
+                    >
+                      <div className="flex flex-col items-center justify-center drop-shadow-2xl">
+                        <span className="text-6xl drop-shadow-lg filter select-none">
+                          {op.details.emoji}
+                        </span>
+                        {op.details.label && (
+                          <span className="text-[11px] font-black tracking-wider px-2 py-0.5 rounded-full bg-black/70 border border-white/20 text-white shadow">
+                            {op.details.label}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
             </div>
           </div>
 
@@ -3270,6 +3680,34 @@ export default function ManualStudioPage() {
 
           {/* Interactive Multi-Track Timeline Simulation */}
           <div className="h-44 bg-[#0B0F1C] border-t border-white/[0.08] p-4 flex flex-col justify-between select-none">
+            {/* AI Audience Retention Drop-Off Heatmap Strip */}
+            <div
+              className="relative w-full h-1.5 rounded-full overflow-hidden flex bg-white/5 border border-white/10 mb-1"
+              title="Audience Retention Heatmap (Green = High Retention, Amber = Moderate, Red = Drop-off Risk)"
+            >
+              {(retentionReport?.retentionSegments || [
+                { start: 0, end: duration * 0.25, level: 'high' as const },
+                { start: duration * 0.25, end: duration * 0.6, level: 'medium' as const },
+                { start: duration * 0.6, end: duration * 0.75, level: 'risk' as const },
+                { start: duration * 0.75, end: duration, level: 'high' as const },
+              ]).map((seg, sIdx) => {
+                const segWidth = ((seg.end - seg.start) / (duration || 1)) * 100;
+                return (
+                  <div
+                    key={sIdx}
+                    style={{ width: `${segWidth}%` }}
+                    className={`h-full transition-all ${
+                      seg.level === 'high'
+                        ? 'bg-emerald-500/70'
+                        : seg.level === 'medium'
+                        ? 'bg-amber-500/70'
+                        : 'bg-rose-500/80 animate-pulse'
+                    }`}
+                  />
+                );
+              })}
+            </div>
+
             {/* Playhead Scrubbing Rail */}
             <div
               className="relative w-full h-4 cursor-pointer"
@@ -3513,6 +3951,29 @@ export default function ManualStudioPage() {
       <KeyboardShortcutsModal
         isOpen={showKeyboardShortcutsModal}
         onClose={() => setShowKeyboardShortcutsModal(false)}
+      />
+
+      {/* Multi-Track Audio Mixer & Console Modal */}
+      <AudioMixerModal
+        isOpen={showAudioMixerModal}
+        onClose={() => setShowAudioMixerModal(false)}
+        mixerState={mixerState}
+        onChangeMixerState={(newState) => {
+          setMixerState(newState);
+          setOriginalVolume(newState.stems.dialogue.volume);
+          setMusicVolume(newState.stems.music.volume);
+          setIsMuted(newState.stems.dialogue.isMuted);
+          toast.success('Updated Audio Mixer levels');
+        }}
+      />
+
+      {/* 1-Click Social Media Launch Kit & Metadata Exporter Modal */}
+      <SocialPublisherModal
+        isOpen={showSocialModal}
+        onClose={() => setShowSocialModal(false)}
+        title={project?.title || 'Viral Video'}
+        transcript={subtitleText || project?.description || ''}
+        duration={duration}
       />
     </div>
   );

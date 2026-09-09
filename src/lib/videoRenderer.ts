@@ -8,6 +8,8 @@ import { computeMotionTransform, applyCanvasTransitionFX } from './transitions';
 import { ChromaKeyOptions, applyChromaKeyToCanvas } from './chromaKey';
 import { ActiveCallout, renderCalloutOnCanvas } from './callouts';
 import { applyLUTOverlayTint, ColorAdjustments } from './colorGrading';
+import { ActiveSticker, renderStickerOnCanvas } from './stickerEngine';
+import { calculateKenBurnsTransform } from './kenBurns';
 
 export interface RenderOptions {
   videoElement: HTMLVideoElement | null;
@@ -20,6 +22,8 @@ export interface RenderOptions {
   duration: number;
   transitionType?: string;
   chromaKey?: ChromaKeyOptions;
+  kenBurnsPreset?: string;
+  stickers?: ActiveSticker[];
   subtitles?: {
     text: string;
     style: 'hormozi' | 'neon' | 'minimal';
@@ -323,26 +327,35 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
           ovY += motion.translateY;
 
           ctx.save();
-          ctx.globalAlpha = motion.opacity;
-          ctx.shadowColor = 'rgba(0,0,0,0.7)';
-          ctx.shadowBlur = 16;
-          ctx.drawImage(ov.el, ovX, ovY, ovW, ovH);
+          if (ov.motionPreset && ['zoom-in', 'zoom-out', 'pan-left-to-right', 'pan-right-to-left', 'diagonal-drift', 'subtle-pulse'].includes(ov.motionPreset)) {
+            const kb = calculateKenBurnsTransform(ov.motionPreset, progress);
+            ctx.translate(ovX + ovW / 2, ovY + ovH / 2);
+            ctx.scale(kb.scale, kb.scale);
+            ctx.translate(-(ovX + ovW / 2), -(ovY + ovH / 2));
+            ctx.shadowColor = 'rgba(0,0,0,0.7)';
+            ctx.shadowBlur = 16;
+            ctx.drawImage(ov.el, ovX, ovY, ovW, ovH);
+          } else {
+            ctx.globalAlpha = motion.opacity;
+            ctx.shadowColor = 'rgba(0,0,0,0.7)';
+            ctx.shadowBlur = 16;
+            ctx.drawImage(ov.el, ovX, ovY, ovW, ovH);
+          }
           ctx.restore();
         }
       }
 
-      // 3b. Apply Motion Cut Transition FX if active
+      // 4. Handle Visual Transitions
       if (options.transitionType && options.transitionType !== 'none') {
-        // Transition at midpoint (e.g. at 50% mark of duration)
-        const transMid = renderDuration * 0.5;
-        const transDur = 0.5;
+        const transDur = 0.6;
+        const transMid = duration / 2;
         if (currentTime >= transMid - transDur / 2 && currentTime <= transMid + transDur / 2) {
           const transProg = (currentTime - (transMid - transDur / 2)) / transDur;
           applyCanvasTransitionFX(ctx, options.transitionType, transProg, width, height);
         }
       }
 
-      // 4. Burn in Burnt-In Subtitles / Karaoke Text
+      // 5. Burn in Burnt-In Subtitles / Karaoke Text
       if (subtitles?.text) {
         ctx.save();
         const fSize = subtitles.fontSize || (aspectRatio === '9:16' ? 36 : 28);
@@ -385,7 +398,7 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
         ctx.restore();
       }
 
-      // 5. Draw Active Social Callouts & Lower-Thirds
+      // 6. Draw Active Social Callouts & Lower-Thirds
       if (options.callouts && options.callouts.length > 0) {
         for (const callout of options.callouts) {
           const calloutEnd = callout.startTime + (callout.duration || 3);
@@ -396,7 +409,14 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
         }
       }
 
-      // 6. Apply Color LUT Overlay Tint if configured
+      // 7. Draw Active Motion Graphics Stickers & Reaction Emojis
+      if (options.stickers && options.stickers.length > 0) {
+        for (const sticker of options.stickers) {
+          renderStickerOnCanvas(ctx, sticker, currentTime, width, height);
+        }
+      }
+
+      // 8. Apply Color LUT Overlay Tint if configured
       if (options.colorLUT) {
         applyLUTOverlayTint(ctx, width, height, options.colorLUT);
       }
