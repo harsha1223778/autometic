@@ -1465,7 +1465,7 @@ export default function ManualStudioPage() {
     setIsRenderingLocal(true);
     setShowExportModal(false);
     try {
-      const mediaSrc = project?.originalVideoUrl;
+      const mediaSrc = project?.originalVideoUrl || mediaAssets[0]?.url || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
       const isImg = isImageMedia(mediaSrc);
       const activeOverlays = operations
         .filter((op) => (op.type === 'overlay_image' || op.type === 'broll_clip') && op.details)
