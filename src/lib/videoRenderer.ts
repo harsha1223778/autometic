@@ -4,6 +4,8 @@
  * with burnt-in subtitles, image overlays, B-roll, color filters, and mixed soundtrack.
  */
 
+import { computeMotionTransform, applyCanvasTransitionFX } from './transitions';
+
 export interface RenderOptions {
   videoElement: HTMLVideoElement | null;
   imageSrc?: string | null;
@@ -11,6 +13,7 @@ export interface RenderOptions {
   reframeMode?: 'blurred-letterbox' | 'crop-center' | 'black-bars';
   filter?: 'clean' | 'warm' | 'cool' | 'cinematic' | 'bw';
   duration: number;
+  transitionType?: string;
   subtitles?: {
     text: string;
     style: 'hormozi' | 'neon' | 'minimal';
@@ -25,6 +28,7 @@ export interface RenderOptions {
     startTime: number;
     duration: number;
     position?: 'top-right' | 'center' | 'lower-third';
+    motionPreset?: string;
   }>;
   musicUrl?: string | null;
   musicVolume?: number;
@@ -69,6 +73,7 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
     startTime: number;
     endTime: number;
     position: string;
+    motionPreset?: string;
   }> = [];
 
   for (const ov of overlays) {
@@ -87,6 +92,7 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
           startTime: Number(ov.startTime) || 0,
           endTime: (Number(ov.startTime) || 0) + (Number(ov.duration) || 3),
           position: ov.position || 'top-right',
+          motionPreset: ov.motionPreset || 'static',
         });
       } catch {
         // Skip faulty overlay
@@ -278,11 +284,18 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
         ctx.restore();
       }
 
-      // 3. Draw Active Image Overlays
+      // 3. Draw Active Image Overlays (with Motion Presets)
       for (const ov of loadedOverlays) {
         if (currentTime >= ov.startTime && currentTime <= ov.endTime) {
-          const ovW = width * 0.28;
-          const ovH = (ovW * ov.el.height) / (ov.el.width || 1);
+          const ovDuration = Math.max(0.1, ov.endTime - ov.startTime);
+          const progress = (currentTime - ov.startTime) / ovDuration;
+          const motion = computeMotionTransform(ov.motionPreset || 'static', progress);
+
+          const baseW = width * 0.28;
+          const baseH = (baseW * ov.el.height) / (ov.el.width || 1);
+          const ovW = baseW * motion.scale;
+          const ovH = baseH * motion.scale;
+
           let ovX = width - ovW - 32;
           let ovY = 32;
 
@@ -294,11 +307,26 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
             ovY = height - ovH - 48;
           }
 
+          ovX += motion.translateX;
+          ovY += motion.translateY;
+
           ctx.save();
+          ctx.globalAlpha = motion.opacity;
           ctx.shadowColor = 'rgba(0,0,0,0.7)';
           ctx.shadowBlur = 16;
           ctx.drawImage(ov.el, ovX, ovY, ovW, ovH);
           ctx.restore();
+        }
+      }
+
+      // 3b. Apply Motion Cut Transition FX if active
+      if (options.transitionType && options.transitionType !== 'none') {
+        // Transition at midpoint (e.g. at 50% mark of duration)
+        const transMid = renderDuration * 0.5;
+        const transDur = 0.5;
+        if (currentTime >= transMid - transDur / 2 && currentTime <= transMid + transDur / 2) {
+          const transProg = (currentTime - (transMid - transDur / 2)) / transDur;
+          applyCanvasTransitionFX(ctx, options.transitionType, transProg, width, height);
         }
       }
 

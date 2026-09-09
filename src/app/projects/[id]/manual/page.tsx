@@ -43,6 +43,10 @@ import {
   Mic,
   Volume1,
   Share2,
+  FileText,
+  Move,
+  Zap,
+  Radio,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import KaraokeSubtitles from '@/components/studio/KaraokeSubtitles';
@@ -57,6 +61,17 @@ import { renderStudioComposition, downloadRenderedBlob } from '@/lib/videoRender
 import { VOICE_PROFILES, speakTextWithProfile, estimateSpeechDuration, VoiceProfile } from '@/lib/ttsEngine';
 import { SOUND_EFFECTS, playSoundEffect, autoDetectFoleyMoments, SoundEffectItem, FoleySuggestion } from '@/lib/sfxLibrary';
 import ThumbnailModal from '@/components/studio/ThumbnailModal';
+import BatchExportModal from '@/components/studio/BatchExportModal';
+import { detectMediaSilences, calculateJumpCutSegments, calculateDeadAirSaved, SilenceInterval } from '@/lib/silenceDetector';
+import { generateViralScript, HOOK_FRAMEWORKS, SCRIPT_CATEGORIES, PRESET_TOPICS, GeneratedScript } from '@/lib/scriptGenerator';
+import { TRANSITION_PRESETS, MOTION_PRESETS, TransitionPreset, MotionPreset } from '@/lib/transitions';
+import {
+  PROCEDURAL_MUSIC_TRACKS,
+  startProceduralMusic,
+  stopProceduralMusic,
+  setProceduralMusicVolume,
+  setProceduralMusicDucking,
+} from '@/lib/musicSynthesizer';
 
 const isImageMedia = (url?: string) => {
   if (!url) return false;
@@ -95,7 +110,7 @@ export default function ManualStudioPage() {
   const [duration, setDuration] = useState(30);
 
   // Studio Tools & Properties State
-  const [activeTab, setActiveTab] = useState<'media' | 'stock' | 'voice' | 'sfx' | 'reframe' | 'trim' | 'audio' | 'subtitles' | 'filters'>('media');
+  const [activeTab, setActiveTab] = useState<'media' | 'stock' | 'voice' | 'script' | 'sfx' | 'transitions' | 'reframe' | 'trim' | 'audio' | 'subtitles' | 'filters'>('media');
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
   const [selectedOverlayPosition, setSelectedOverlayPosition] = useState<'top-right' | 'center' | 'lower-third'>('top-right');
   const [overlayDuration, setOverlayDuration] = useState(4.0);
@@ -117,6 +132,28 @@ export default function ManualStudioPage() {
 
   // Thumbnail Generator Studio State
   const [showThumbnailModal, setShowThumbnailModal] = useState(false);
+
+  // 1. AI Auto-Jumpcut & Silence Removal State
+  const [detectedSilences, setDetectedSilences] = useState<SilenceInterval[]>([]);
+  const [isDetectingSilences, setIsDetectingSilences] = useState(false);
+  const [deadAirStats, setDeadAirStats] = useState<{ savedSeconds: number; percentSaved: number; newDuration: number } | null>(null);
+
+  // 2. AI Video Hook & Script Generator State
+  const [scriptTopic, setScriptTopic] = useState('How to automate video editing with AI');
+  const [scriptCategory, setScriptCategory] = useState('Tech & AI');
+  const [scriptFramework, setScriptFramework] = useState('curiosity-gap');
+  const [generatedScript, setGeneratedScript] = useState<GeneratedScript | null>(null);
+  const [isGeneratingScript, setIsGeneratingScript] = useState(false);
+
+  // 3. Motion Transitions & Visual FX State
+  const [selectedTransition, setSelectedTransition] = useState('whip-pan');
+  const [selectedMotionPreset, setSelectedMotionPreset] = useState('ken-burns');
+
+  // 4. AI Procedural Music & Auto-Ducking State
+  const [selectedProceduralTrack, setSelectedProceduralTrack] = useState<string | null>(null);
+  const [isPlayingProcedural, setIsPlayingProcedural] = useState(false);
+  const [autoDuckingEnabled, setAutoDuckingEnabled] = useState(true);
+  const [proceduralVolume, setProceduralVolume] = useState(25);
 
   // Trim & Audio State
   const [trimStart, setTrimStart] = useState(0);
@@ -510,7 +547,100 @@ export default function ManualStudioPage() {
     );
   };
 
-  const handleInBrowserRender = async () => {
+  // 1. AI Auto-Jumpcut & Silence Removal Handlers
+  const handleDetectSilences = async () => {
+    setIsDetectingSilences(true);
+    toast.info('Analyzing audio cadence and speech energy...');
+    try {
+      const silences = await detectMediaSilences(videoRef.current, {
+        duration,
+        minSilenceDuration: 0.45,
+      });
+      setDetectedSilences(silences);
+      const stats = calculateDeadAirSaved(duration, silences);
+      setDeadAirStats(stats);
+      if (silences.length > 0) {
+        toast.success(`⚡ Detected ${silences.length} pauses! Can trim ${stats.savedSeconds}s (${stats.percentSaved}% dead air).`);
+      } else {
+        toast.info('Audio is tight! No long pauses detected.');
+      }
+    } catch (err: any) {
+      toast.error('Could not analyze audio for silences');
+    } finally {
+      setIsDetectingSilences(false);
+    }
+  };
+
+  const handleApplyAutoJumpcuts = () => {
+    if (detectedSilences.length === 0) {
+      toast.error('Please scan for silences first');
+      return;
+    }
+    const stats = calculateDeadAirSaved(duration, detectedSilences);
+    addOperation('jumpcut_remove_silence', `Auto-Jumpcut: Trimmed ${detectedSilences.length} pauses`, {
+      silencesCount: detectedSilences.length,
+      savedSeconds: stats.savedSeconds,
+      newDuration: stats.newDuration,
+    });
+    setTrimEnd(stats.newDuration);
+    setDeadAirStats(null);
+    setDetectedSilences([]);
+    toast.success(`✂️ Applied auto-jumpcuts! Removed ${stats.savedSeconds}s of dead air.`);
+  };
+
+  // 2. AI Video Hook & Script Generator Handlers
+  const handleGenerateViralScript = () => {
+    setIsGeneratingScript(true);
+    try {
+      const script = generateViralScript(scriptTopic, scriptCategory, scriptFramework);
+      setGeneratedScript(script);
+      toast.success(`✨ Generated ${script.frameworkName} script (~${script.estimatedDuration}s)!`);
+    } catch (err: any) {
+      toast.error('Failed to generate viral script');
+    } finally {
+      setIsGeneratingScript(false);
+    }
+  };
+
+  const handleApplyScriptToStudio = () => {
+    if (!generatedScript) return;
+    setVoiceoverScript(generatedScript.fullScript);
+    setSubtitleText(generatedScript.fullScript);
+    setActiveTab('voice');
+    toast.success('Pushed script to AI Voiceover Studio & Karaoke Subtitles!');
+  };
+
+  // 3. AI Procedural Background Music Handlers
+  const handleToggleProceduralMusic = (trackId: string) => {
+    if (selectedProceduralTrack === trackId && isPlayingProcedural) {
+      stopProceduralMusic();
+      setIsPlayingProcedural(false);
+      setSelectedProceduralTrack(null);
+      toast.info('Stopped procedural music');
+    } else {
+      setSelectedProceduralTrack(trackId);
+      startProceduralMusic(trackId, proceduralVolume / 100);
+      setIsPlayingProcedural(true);
+      toast.success(`Playing procedural loop: ${trackId}`);
+    }
+  };
+
+  // Dynamic Auto-Ducking Watcher
+  useEffect(() => {
+    if (autoDuckingEnabled && isPlayingProcedural) {
+      setProceduralMusicDucking(isSpeaking);
+    }
+  }, [isSpeaking, autoDuckingEnabled, isPlayingProcedural]);
+
+  // Clean up procedural music on unmount
+  useEffect(() => {
+    return () => {
+      stopProceduralMusic();
+    };
+  }, []);
+
+  const handleInBrowserRender = async (presetAspect?: '16:9' | '9:16' | '1:1') => {
+    const targetAspect = presetAspect || aspectRatio;
     setIsRenderingLocal(true);
     setShowExportModal(false);
     try {
@@ -526,14 +656,16 @@ export default function ManualStudioPage() {
           startTime: Number(op.details.startTime) || 0,
           duration: Number(op.details.duration) || 3,
           position: op.details.position || 'top-right',
+          motionPreset: selectedMotionPreset,
         }));
 
       const outputBlob = await renderStudioComposition({
         videoElement: isImg ? null : videoRef.current,
         imageSrc: isImg ? mediaSrc : null,
-        aspectRatio,
+        aspectRatio: targetAspect,
         reframeMode,
         filter: selectedFilter,
+        transitionType: selectedTransition,
         duration: Math.min(30, trimEnd - trimStart || duration),
         subtitles: subtitleText
           ? {
@@ -554,9 +686,9 @@ export default function ManualStudioPage() {
 
       downloadRenderedBlob(
         outputBlob,
-        `${(project?.title || 'editflow').toLowerCase().replace(/\s+/g, '_')}_${aspectRatio}.webm`
+        `${(project?.title || 'editflow').toLowerCase().replace(/\s+/g, '_')}_${targetAspect}.webm`
       );
-      toast.success('🎉 Video render completed and downloaded successfully!');
+      toast.success(`🎉 Video render completed and downloaded (${targetAspect})!`);
     } catch (err: any) {
       console.error(err);
       toast.error(err.message || 'Render failed');
@@ -713,14 +845,16 @@ export default function ManualStudioPage() {
         {/* Left Tools Panel */}
         <div className="w-80 bg-[#080B14]/90 border-r border-white/[0.08] flex flex-col">
           {/* Tool Navigation Tabs */}
-          <div className="grid grid-cols-5 sm:grid-cols-9 border-b border-white/[0.08] p-1 gap-1">
+          <div className="flex overflow-x-auto sm:grid sm:grid-cols-6 lg:grid-cols-6 border-b border-white/[0.08] p-1.5 gap-1 scrollbar-none">
             {[
               { id: 'media', label: 'Media', icon: ImageIcon },
               { id: 'stock', label: 'B-Roll', icon: Flame },
+              { id: 'script', label: 'Script', icon: FileText },
               { id: 'voice', label: 'Voice', icon: Mic },
               { id: 'sfx', label: 'SFX', icon: Volume1 },
+              { id: 'transitions', label: 'FX/Cut', icon: Zap },
               { id: 'reframe', label: 'Reframe', icon: Crop },
-              { id: 'trim', label: 'Trim', icon: Scissors },
+              { id: 'trim', label: 'Jumpcut', icon: Scissors },
               { id: 'audio', label: 'Audio', icon: Volume2 },
               { id: 'subtitles', label: 'Subs', icon: Type },
               { id: 'filters', label: 'Filter', icon: Palette },
@@ -730,13 +864,13 @@ export default function ManualStudioPage() {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id as any)}
-                  className={`py-2 px-1 rounded-xl text-[10px] font-medium flex flex-col items-center gap-1 transition-all ${
+                  className={`py-1.5 px-2 rounded-xl text-[10px] font-medium flex-shrink-0 flex items-center justify-center gap-1 transition-all ${
                     activeTab === tab.id
                       ? 'bg-purple-600/25 text-purple-300 border border-purple-500/40 font-bold shadow-sm'
                       : 'text-slate-400 hover:text-white hover:bg-white/[0.03]'
                   }`}
                 >
-                  <Icon className="w-3.5 h-3.5" />
+                  <Icon className="w-3 h-3" />
                   <span className="truncate">{tab.label}</span>
                 </button>
               );
@@ -1019,6 +1153,129 @@ export default function ManualStudioPage() {
               </div>
             )}
 
+            {activeTab === 'script' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-pink-400" /> Viral Hooks & Scripts
+                  </h4>
+                  <span className="text-[10px] text-pink-400 font-mono font-semibold">AI Generator</span>
+                </div>
+
+                {/* Niche Categories */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] text-slate-400 font-medium block">Niche / Industry</label>
+                  <div className="flex gap-1 overflow-x-auto no-scrollbar py-0.5">
+                    {SCRIPT_CATEGORIES.map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setScriptCategory(cat)}
+                        className={`px-2 py-1 rounded-lg text-[10px] font-medium whitespace-nowrap transition-all ${
+                          scriptCategory === cat
+                            ? 'bg-pink-500/20 text-pink-300 border border-pink-500/40 font-bold'
+                            : 'bg-white/[0.02] border border-white/[0.06] text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Hook Frameworks */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] text-slate-400 font-medium block">Hook Psychology Framework</label>
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                    {HOOK_FRAMEWORKS.map((hw) => (
+                      <button
+                        key={hw.id}
+                        type="button"
+                        onClick={() => setScriptFramework(hw.id)}
+                        className={`w-full p-2 rounded-xl border text-left transition-all ${
+                          scriptFramework === hw.id
+                            ? 'bg-pink-500/20 border-pink-500 text-white shadow-sm'
+                            : 'bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-white">{hw.name}</span>
+                          <span className="text-[9px] text-pink-300 font-mono">{hw.badge}</span>
+                        </div>
+                        <p className="text-[9px] text-slate-400 mt-0.5">{hw.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Topic Input & Presets */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] text-slate-400 font-medium block">Video Topic / Core Idea</label>
+                  <input
+                    type="text"
+                    value={scriptTopic}
+                    onChange={(e) => setScriptTopic(e.target.value)}
+                    placeholder="e.g. 3 tools every video editor needs..."
+                    className="w-full p-2.5 rounded-xl bg-white/[0.04] border border-white/[0.08] text-xs text-white focus:outline-none focus:border-pink-500"
+                  />
+                  {PRESET_TOPICS[scriptCategory] && (
+                    <div className="flex flex-wrap gap-1 pt-1">
+                      {PRESET_TOPICS[scriptCategory].slice(0, 3).map((topicSuggestion, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => setScriptTopic(topicSuggestion)}
+                          className="text-[9px] px-2 py-0.5 rounded-md bg-white/[0.03] hover:bg-white/10 text-slate-400 hover:text-pink-300 border border-white/[0.06] truncate max-w-[200px]"
+                        >
+                          + {topicSuggestion}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Generate Script Button */}
+                <button
+                  type="button"
+                  onClick={handleGenerateViralScript}
+                  disabled={isGeneratingScript}
+                  className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-500 hover:to-purple-500 text-xs font-bold text-white shadow-md shadow-pink-600/30 flex items-center justify-center gap-1.5 transition-all disabled:opacity-50"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-pink-200" />
+                  <span>{isGeneratingScript ? 'Generating...' : 'Generate Viral Script'}</span>
+                </button>
+
+                {/* Generated Script Card */}
+                {generatedScript && (
+                  <div className="p-3 rounded-2xl bg-pink-950/20 border border-pink-500/30 space-y-2.5">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="font-bold text-pink-300 uppercase">{generatedScript.frameworkName}</span>
+                      <span className="font-mono text-slate-400">~{generatedScript.estimatedDuration}s ({generatedScript.wordCount} words)</span>
+                    </div>
+
+                    <div className="p-2 rounded-xl bg-black/40 border border-white/5 space-y-1 text-xs">
+                      <p className="text-white font-bold text-[11px] leading-snug">🎣 Hook: {generatedScript.hook}</p>
+                      <div className="text-slate-300 text-[10px] space-y-0.5 pl-1.5 border-l border-pink-500/40">
+                        {generatedScript.bodyPoints.map((pt, idx) => (
+                          <p key={idx}>{pt}</p>
+                        ))}
+                      </div>
+                      <p className="text-pink-300 text-[10px] italic">📣 CTA: {generatedScript.cta}</p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleApplyScriptToStudio}
+                      className="w-full py-2 px-3 rounded-xl bg-pink-600 hover:bg-pink-500 text-white text-xs font-bold shadow-md shadow-pink-600/20 flex items-center justify-center gap-1.5 transition-all"
+                    >
+                      <Mic className="w-3.5 h-3.5" />
+                      <span>Push to Voiceover & Subtitles</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {activeTab === 'voice' && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
@@ -1197,6 +1454,83 @@ export default function ManualStudioPage() {
               </div>
             )}
 
+            {activeTab === 'transitions' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5 text-cyan-400" /> Cut Transitions & Motion FX
+                  </h4>
+                  <span className="text-[10px] text-cyan-400 font-mono font-semibold">Pro FX</span>
+                </div>
+
+                {/* Transition Cut Presets */}
+                <div className="space-y-2">
+                  <label className="text-[11px] text-slate-400 font-medium block">
+                    Scene Cut Transition ({TRANSITION_PRESETS.length})
+                  </label>
+                  <div className="space-y-1.5">
+                    {TRANSITION_PRESETS.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedTransition(t.id);
+                          toast.success(`Transition set to ${t.name}`);
+                        }}
+                        className={`w-full p-2.5 rounded-xl border text-left transition-all flex items-center justify-between ${
+                          selectedTransition === t.id
+                            ? 'bg-cyan-500/20 border-cyan-400 text-white shadow-md shadow-cyan-900/20'
+                            : 'bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">{t.icon}</span>
+                          <div>
+                            <p className="text-xs font-bold text-white">{t.name}</p>
+                            <p className="text-[9px] text-slate-400 leading-tight">{t.description}</p>
+                          </div>
+                        </div>
+                        {selectedTransition === t.id && <Check className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Overlay Motion Presets */}
+                <div className="space-y-2 pt-2 border-t border-white/[0.06]">
+                  <label className="text-[11px] text-slate-400 font-medium block">
+                    Overlay & B-Roll Motion Animation
+                  </label>
+                  <div className="space-y-1.5">
+                    {MOTION_PRESETS.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedMotionPreset(m.id);
+                          toast.success(`Overlay motion preset set to ${m.name}`);
+                        }}
+                        className={`w-full p-2.5 rounded-xl border text-left transition-all flex items-center justify-between ${
+                          selectedMotionPreset === m.id
+                            ? 'bg-purple-600/20 border-purple-400 text-white shadow-md shadow-purple-900/20'
+                            : 'bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">{m.icon}</span>
+                          <div>
+                            <p className="text-xs font-bold text-white">{m.name}</p>
+                            <p className="text-[9px] text-slate-400 leading-tight">{m.description}</p>
+                          </div>
+                        </div>
+                        {selectedMotionPreset === m.id && <Check className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {activeTab === 'reframe' && (
               <div className="space-y-4">
                 <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
@@ -1295,6 +1629,57 @@ export default function ManualStudioPage() {
                     <Trash2 className="w-4 h-4" />
                     <span>Delete Section</span>
                   </button>
+                </div>
+
+                {/* AI Auto-Jumpcut & Silence Removal Section */}
+                <div className="p-3.5 rounded-2xl bg-cyan-950/20 border border-cyan-500/30 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                      <Zap className="w-3.5 h-3.5 text-cyan-400" /> AI Auto-Jumpcut
+                    </span>
+                    <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300">
+                      Silence Removal
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 leading-snug">
+                    Scans audio for awkward silences (&gt;0.45s) and creates rapid-fire, high-retention cuts.
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={handleDetectSilences}
+                    disabled={isDetectingSilences}
+                    className="w-full py-2 px-3 rounded-xl bg-cyan-600/30 hover:bg-cyan-600/50 border border-cyan-500/40 text-cyan-200 text-xs font-semibold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-cyan-300" />
+                    <span>{isDetectingSilences ? 'Analyzing Cadence...' : 'Scan Pauses & Dead Air'}</span>
+                  </button>
+
+                  {/* Detected Silences & Dead Air Stats */}
+                  {deadAirStats && detectedSilences.length > 0 && (
+                    <div className="space-y-2 pt-1">
+                      <div className="p-2.5 rounded-xl bg-black/40 border border-cyan-500/20 flex items-center justify-between text-xs">
+                        <div>
+                          <p className="font-bold text-white text-[11px]">Found {detectedSilences.length} Pauses</p>
+                          <p className="text-[10px] text-cyan-400 font-mono">
+                            Saves {deadAirStats.savedSeconds}s ({deadAirStats.percentSaved}% faster)
+                          </p>
+                        </div>
+                        <span className="text-[10px] font-mono text-slate-400">
+                          {duration}s → {deadAirStats.newDuration}s
+                        </span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleApplyAutoJumpcuts}
+                        className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-cyan-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500 text-black font-extrabold text-xs shadow-md shadow-cyan-500/20 flex items-center justify-center gap-1.5 transition-all"
+                      >
+                        <Scissors className="w-3.5 h-3.5" />
+                        <span>Apply Auto-Jumpcuts ({deadAirStats.savedSeconds}s cut)</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-2 pt-2">
@@ -1401,6 +1786,75 @@ export default function ManualStudioPage() {
                       />
                     </div>
                   )}
+
+                  {/* AI Procedural Background Music & Auto-Ducking */}
+                  <div className="p-3.5 rounded-2xl bg-purple-950/20 border border-purple-500/30 space-y-3 pt-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-purple-300 flex items-center gap-1.5">
+                        <Radio className="w-3.5 h-3.5 text-purple-400" /> AI Procedural Music
+                      </span>
+                      <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300">
+                        Royalty Free
+                      </span>
+                    </div>
+
+                    {/* Auto-Ducking Switch */}
+                    <div className="flex items-center justify-between p-2 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+                      <div>
+                        <p className="text-[11px] font-semibold text-white">Smart Auto-Ducking</p>
+                        <p className="text-[9px] text-slate-400">Lowers music by 75% when speech is detected</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setAutoDuckingEnabled(!autoDuckingEnabled)}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                          autoDuckingEnabled
+                            ? 'bg-purple-600 text-white shadow-sm'
+                            : 'bg-white/10 text-slate-400'
+                        }`}
+                      >
+                        {autoDuckingEnabled ? 'ENABLED' : 'OFF'}
+                      </button>
+                    </div>
+
+                    {/* Procedural Loops List */}
+                    <div className="space-y-1.5">
+                      {PROCEDURAL_MUSIC_TRACKS.map((t) => {
+                        const isPlaying = selectedProceduralTrack === t.id && isPlayingProcedural;
+                        return (
+                          <div
+                            key={t.id}
+                            className={`p-2 rounded-xl border text-xs transition-all flex items-center justify-between ${
+                              isPlaying
+                                ? 'bg-purple-600/20 border-purple-500 text-white'
+                                : 'bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 overflow-hidden">
+                              <span className="text-sm flex-shrink-0">{t.icon}</span>
+                              <div className="overflow-hidden">
+                                <p className="text-[11px] font-bold text-white truncate">{t.name}</p>
+                                <span className="text-[9px] text-purple-300">{t.genre} • {t.bpm} BPM</span>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleToggleProceduralMusic(t.id)}
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all ${
+                                isPlaying
+                                  ? 'bg-purple-600 text-white animate-pulse'
+                                  : 'bg-white/10 hover:bg-white/20 text-white'
+                              }`}
+                            >
+                              {isPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                              <span>{isPlaying ? 'Stop' : 'Play'}</span>
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -1887,65 +2341,17 @@ export default function ManualStudioPage() {
         </div>
       </div>
 
-      {/* Export Options Modal Dialog */}
-      {showExportModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="max-w-md w-full p-6 rounded-3xl glass-panel border border-purple-500/30 shadow-2xl space-y-5">
-            <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
-              <div>
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <Download className="w-4 h-4 text-cyan-400" /> Export Rendered Video
-                </h3>
-                <p className="text-xs text-slate-400">Choose your rendering execution method</p>
-              </div>
-              <button
-                onClick={() => setShowExportModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-white"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              {/* Option 1: Fast In-Browser Direct Render & Download */}
-              <button
-                onClick={handleInBrowserRender}
-                className="w-full p-4 rounded-2xl bg-gradient-to-r from-purple-600/20 via-indigo-600/20 to-cyan-500/20 border border-purple-500/40 hover:border-cyan-400 text-left transition-all hover:scale-[1.01] group"
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-bold text-white group-hover:text-cyan-300 flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-cyan-400" /> Fast In-Browser Render & Download
-                  </span>
-                  <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-                    Direct File
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Uses WebCodecs & Canvas to burn subtitles, image overlays, color filters, and audio directly in your browser, then triggers an instant file download.
-                </p>
-              </button>
-
-              {/* Option 2: Cloud Worker Node Render */}
-              <button
-                onClick={handleCloudExport}
-                className="w-full p-4 rounded-2xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/10 text-left transition-all hover:border-purple-500/40 group"
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-bold text-white group-hover:text-purple-300 flex items-center gap-1.5">
-                    <RefreshCw className="w-3.5 h-3.5 text-purple-400" /> Queue Cloud Render Job
-                  </span>
-                  <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                    Background
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Queues the render job to a background node and navigates to the live render dashboard.
-                </p>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Batch Multi-Platform & Highlight GIF Snippet Export Studio */}
+      <BatchExportModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        onTriggerInBrowserRender={handleInBrowserRender}
+        onTriggerCloudExport={handleCloudExport}
+        videoElement={videoRef.current}
+        projectTitle={project?.title || 'editflow'}
+        currentTime={currentTime}
+        duration={duration}
+      />
 
       {/* Live In-Browser Video Render Progress Modal */}
       {isRenderingLocal && (
