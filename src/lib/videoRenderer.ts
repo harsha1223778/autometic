@@ -5,6 +5,7 @@
  */
 
 import { computeMotionTransform, applyCanvasTransitionFX } from './transitions';
+import { ChromaKeyOptions, applyChromaKeyToCanvas } from './chromaKey';
 
 export interface RenderOptions {
   videoElement: HTMLVideoElement | null;
@@ -14,6 +15,7 @@ export interface RenderOptions {
   filter?: 'clean' | 'warm' | 'cool' | 'cinematic' | 'bw';
   duration: number;
   transitionType?: string;
+  chromaKey?: ChromaKeyOptions;
   subtitles?: {
     text: string;
     style: 'hormozi' | 'neon' | 'minimal';
@@ -253,6 +255,11 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
           // Standard fit
           ctx.drawImage(videoElement, 0, 0, width, height);
         }
+      }
+
+      // 1b. Apply Chroma Key Background Transparency
+      if (options.chromaKey?.enabled) {
+        applyChromaKeyToCanvas(ctx, width, height, options.chromaKey);
       }
 
       // 2. Apply Color Grading Filter Overlay

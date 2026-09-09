@@ -47,6 +47,11 @@ import {
   Move,
   Zap,
   Radio,
+  Gauge,
+  TrendingUp,
+  Copy,
+  BookOpen,
+  CheckCircle2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import KaraokeSubtitles from '@/components/studio/KaraokeSubtitles';
@@ -72,6 +77,11 @@ import {
   setProceduralMusicVolume,
   setProceduralMusicDucking,
 } from '@/lib/musicSynthesizer';
+import { generateVideoSEOAndChapters, SEOMetadata, ChapterItem } from '@/lib/chapterGenerator';
+import { ChromaKeyOptions, DEFAULT_CHROMA_KEY_OPTIONS } from '@/lib/chromaKey';
+import { SPEED_RAMP_PRESETS, calculateInstantPlaybackRate, applyPlaybackSpeed, SpeedRampPreset } from '@/lib/speedRamp';
+import { evaluateViralityScore, ViralityReport } from '@/lib/viralityCoach';
+import MultiClipSequencer, { SequenceClip } from '@/components/studio/MultiClipSequencer';
 
 const isImageMedia = (url?: string) => {
   if (!url) return false;
@@ -110,7 +120,7 @@ export default function ManualStudioPage() {
   const [duration, setDuration] = useState(30);
 
   // Studio Tools & Properties State
-  const [activeTab, setActiveTab] = useState<'media' | 'stock' | 'voice' | 'script' | 'sfx' | 'transitions' | 'reframe' | 'trim' | 'audio' | 'subtitles' | 'filters'>('media');
+  const [activeTab, setActiveTab] = useState<'media' | 'stock' | 'sequence' | 'voice' | 'script' | 'sfx' | 'transitions' | 'speed' | 'chroma' | 'coach' | 'seo' | 'reframe' | 'trim' | 'audio' | 'subtitles' | 'filters'>('media');
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
   const [selectedOverlayPosition, setSelectedOverlayPosition] = useState<'top-right' | 'center' | 'lower-third'>('top-right');
   const [overlayDuration, setOverlayDuration] = useState(4.0);
@@ -154,6 +164,23 @@ export default function ManualStudioPage() {
   const [isPlayingProcedural, setIsPlayingProcedural] = useState(false);
   const [autoDuckingEnabled, setAutoDuckingEnabled] = useState(true);
   const [proceduralVolume, setProceduralVolume] = useState(25);
+
+  // 5. WebGL Chroma Key & Green Screen State
+  const [chromaKeyOptions, setChromaKeyOptions] = useState<ChromaKeyOptions>(DEFAULT_CHROMA_KEY_OPTIONS);
+
+  // 6. Speed Ramping State
+  const [selectedSpeedRamp, setSelectedSpeedRamp] = useState('normal');
+
+  // 7. Multi-Clip Sequencer State
+  const [sequenceClips, setSequenceClips] = useState<SequenceClip[]>([]);
+  const [activeSequenceClipId, setActiveSequenceClipId] = useState<string | undefined>(undefined);
+
+  // 8. AI Chapter Markers & SEO State
+  const [seoMetadata, setSeoMetadata] = useState<SEOMetadata | null>(null);
+  const [isGeneratingSEO, setIsGeneratingSEO] = useState(false);
+
+  // 9. AI Virality Score & Retention Coach State
+  const [viralityReport, setViralityReport] = useState<ViralityReport | null>(null);
 
   // Trim & Audio State
   const [trimStart, setTrimStart] = useState(0);
@@ -639,6 +666,74 @@ export default function ManualStudioPage() {
     };
   }, []);
 
+  // 5. Speed Ramping Handler
+  const handleSelectSpeedRamp = (presetId: string) => {
+    setSelectedSpeedRamp(presetId);
+    const preset = SPEED_RAMP_PRESETS.find((p) => p.id === presetId);
+    if (preset && videoRef.current) {
+      applyPlaybackSpeed(videoRef.current, preset.baseSpeed, true);
+    }
+    toast.success(`Speed ramp set to ${preset?.name || presetId}`);
+  };
+
+  // 6. AI Chapter Markers & SEO Handler
+  const handleGenerateSEO = () => {
+    setIsGeneratingSEO(true);
+    try {
+      const seo = generateVideoSEOAndChapters(
+        project?.title || 'Viral Video',
+        subtitleText,
+        duration,
+        operations
+      );
+      setSeoMetadata(seo);
+      toast.success('Generated YouTube Chapters & SEO metadata!');
+    } catch (err) {
+      toast.error('Could not generate SEO metadata');
+    } finally {
+      setIsGeneratingSEO(false);
+    }
+  };
+
+  // 7. AI Virality Score & Retention Coach Handler
+  const handleRunViralityCoach = () => {
+    const report = evaluateViralityScore({
+      duration,
+      operations,
+      hasSubtitles: Boolean(subtitleText && subtitleText.trim()),
+      subtitleLength: subtitleText ? subtitleText.split(/\s+/).length : 0,
+      hasMusic: Boolean(musicTrack || (selectedProceduralTrack && isPlayingProcedural)),
+      autoDucking: autoDuckingEnabled,
+    });
+    setViralityReport(report);
+    toast.success(`Retention Coach: Score ${report.overallScore}/100 (${report.tierBadge})`);
+  };
+
+  // 8. Multi-Clip Sequencer Handlers
+  const handleReorderClips = (newClips: SequenceClip[]) => {
+    setSequenceClips(newClips);
+  };
+  const handleRemoveClip = (clipId: string) => {
+    setSequenceClips((prev) => prev.filter((c) => c.id !== clipId));
+  };
+  const handleUpdateClipDuration = (clipId: string, newDur: number) => {
+    setSequenceClips((prev) =>
+      prev.map((c) => (c.id === clipId ? { ...c, duration: newDur } : c))
+    );
+  };
+  const handleAddAssetToSequence = (asset: MediaAsset) => {
+    const newClip: SequenceClip = {
+      id: `clip-${Date.now()}`,
+      name: asset.name,
+      url: asset.url,
+      type: asset.type,
+      duration: asset.duration || (asset.type === 'image' ? 4 : 8),
+      thumbnailUrl: asset.thumbnailUrl,
+    };
+    setSequenceClips((prev) => [...prev, newClip]);
+    toast.success(`Added "${asset.name}" to sequence #${sequenceClips.length + 1}`);
+  };
+
   const handleInBrowserRender = async (presetAspect?: '16:9' | '9:16' | '1:1') => {
     const targetAspect = presetAspect || aspectRatio;
     setIsRenderingLocal(true);
@@ -666,6 +761,7 @@ export default function ManualStudioPage() {
         reframeMode,
         filter: selectedFilter,
         transitionType: selectedTransition,
+        chromaKey: chromaKeyOptions.enabled ? chromaKeyOptions : undefined,
         duration: Math.min(30, trimEnd - trimStart || duration),
         subtitles: subtitleText
           ? {
@@ -845,14 +941,19 @@ export default function ManualStudioPage() {
         {/* Left Tools Panel */}
         <div className="w-80 bg-[#080B14]/90 border-r border-white/[0.08] flex flex-col">
           {/* Tool Navigation Tabs */}
-          <div className="flex overflow-x-auto sm:grid sm:grid-cols-6 lg:grid-cols-6 border-b border-white/[0.08] p-1.5 gap-1 scrollbar-none">
+          <div className="flex overflow-x-auto border-b border-white/[0.08] p-1.5 gap-1">
             {[
               { id: 'media', label: 'Media', icon: ImageIcon },
+              { id: 'sequence', label: 'Multi-Clip', icon: Layers },
               { id: 'stock', label: 'B-Roll', icon: Flame },
               { id: 'script', label: 'Script', icon: FileText },
               { id: 'voice', label: 'Voice', icon: Mic },
               { id: 'sfx', label: 'SFX', icon: Volume1 },
               { id: 'transitions', label: 'FX/Cut', icon: Zap },
+              { id: 'speed', label: 'Speed', icon: Gauge },
+              { id: 'chroma', label: 'Green Screen', icon: Sparkles },
+              { id: 'coach', label: 'Virality', icon: TrendingUp },
+              { id: 'seo', label: 'Chapters/SEO', icon: BookOpen },
               { id: 'reframe', label: 'Reframe', icon: Crop },
               { id: 'trim', label: 'Jumpcut', icon: Scissors },
               { id: 'audio', label: 'Audio', icon: Volume2 },
@@ -1024,6 +1125,17 @@ export default function ManualStudioPage() {
                   </div>
                 )}
               </div>
+            )}
+
+            {activeTab === 'sequence' && (
+              <MultiClipSequencer
+                clips={sequenceClips}
+                onReorderClips={handleReorderClips}
+                onRemoveClip={handleRemoveClip}
+                onUpdateClipDuration={handleUpdateClipDuration}
+                onSelectClip={(clip) => setActiveSequenceClipId(clip.id)}
+                activeClipId={activeSequenceClipId}
+              />
             )}
 
             {activeTab === 'stock' && (
@@ -1528,6 +1640,318 @@ export default function ManualStudioPage() {
                     ))}
                   </div>
                 </div>
+              </div>
+            )}
+
+            {activeTab === 'speed' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <Gauge className="w-3.5 h-3.5 text-cyan-400" /> Speed Ramping & Velocity
+                  </h4>
+                  <span className="text-[10px] text-cyan-400 font-mono font-semibold">Pitch Preserved</span>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[11px] text-slate-400 font-medium block">
+                    Velocity Curve Presets ({SPEED_RAMP_PRESETS.length})
+                  </label>
+                  <div className="space-y-2">
+                    {SPEED_RAMP_PRESETS.map((sr) => (
+                      <button
+                        key={sr.id}
+                        type="button"
+                        onClick={() => handleSelectSpeedRamp(sr.id)}
+                        className={`w-full p-2.5 rounded-xl border text-left transition-all ${
+                          selectedSpeedRamp === sr.id
+                            ? 'bg-cyan-500/20 border-cyan-400 text-white shadow-md shadow-cyan-900/20'
+                            : 'bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                            <span>{sr.icon}</span> {sr.name}
+                          </span>
+                          <span className="text-[9px] font-mono font-bold text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded border border-cyan-500/20">
+                            {sr.badge}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 leading-snug">{sr.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'chroma' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-400" /> Green Screen & Chroma Key
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setChromaKeyOptions((prev) => ({ ...prev, enabled: !prev.enabled }));
+                      toast.success(`Chroma Key ${!chromaKeyOptions.enabled ? 'Enabled' : 'Disabled'}`);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                      chromaKeyOptions.enabled
+                        ? 'bg-emerald-500 text-black shadow-sm'
+                        : 'bg-white/10 text-slate-400'
+                    }`}
+                  >
+                    {chromaKeyOptions.enabled ? 'ENABLED' : 'OFF'}
+                  </button>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-white/[0.02] border border-white/[0.06] space-y-3">
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] text-slate-400 font-medium block">Key Screen Color</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { id: 'green', label: 'Green Screen', color: '#00FF00' },
+                        { id: 'blue', label: 'Blue Screen', color: '#0000FF' },
+                      ].map((kc) => (
+                        <button
+                          key={kc.id}
+                          type="button"
+                          onClick={() => setChromaKeyOptions((prev) => ({ ...prev, keyColor: kc.id as any }))}
+                          className={`p-2 rounded-xl border text-xs font-semibold flex items-center gap-2 transition-all ${
+                            chromaKeyOptions.keyColor === kc.id
+                              ? 'bg-emerald-500/20 border-emerald-400 text-white'
+                              : 'bg-white/[0.02] border-white/[0.06] text-slate-400'
+                          }`}
+                        >
+                          <span className="w-3 h-3 rounded-full border border-white/20" style={{ backgroundColor: kc.color }} />
+                          <span>{kc.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-400">Tolerance (Similarity)</span>
+                      <span className="text-emerald-400 font-mono">{Math.round(chromaKeyOptions.similarity * 100)}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0.1}
+                      max={0.8}
+                      step={0.02}
+                      value={chromaKeyOptions.similarity}
+                      onChange={(e) =>
+                        setChromaKeyOptions((prev) => ({ ...prev, similarity: parseFloat(e.target.value) }))
+                      }
+                      className="w-full accent-emerald-400"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-400">Edge Smoothness</span>
+                      <span className="text-emerald-400 font-mono">{Math.round(chromaKeyOptions.smoothness * 100)}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0.02}
+                      max={0.35}
+                      step={0.01}
+                      value={chromaKeyOptions.smoothness}
+                      onChange={(e) =>
+                        setChromaKeyOptions((prev) => ({ ...prev, smoothness: parseFloat(e.target.value) }))
+                      }
+                      className="w-full accent-emerald-400"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'coach' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <TrendingUp className="w-3.5 h-3.5 text-cyan-400" /> Virality & Retention Coach
+                  </h4>
+                  <span className="text-[10px] text-cyan-400 font-mono font-semibold">AI Coach</span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleRunViralityCoach}
+                  className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-cyan-500/20 via-purple-500/20 to-pink-500/20 border border-cyan-500/40 hover:border-cyan-400 text-xs font-bold text-white flex items-center justify-center gap-2 shadow-sm transition-all"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-cyan-300 animate-pulse" />
+                  <span>Analyze Retention & Virality Potential</span>
+                </button>
+
+                {viralityReport && (
+                  <div className="space-y-3">
+                    {/* Score Gauge Card */}
+                    <div className={`p-4 rounded-2xl border text-center space-y-1 ${viralityReport.colorClass}`}>
+                      <span className="text-3xl font-black block font-mono">{viralityReport.overallScore}/100</span>
+                      <span className="text-xs font-bold uppercase tracking-wider">{viralityReport.tierBadge}</span>
+                    </div>
+
+                    {/* 5 Retention Metrics */}
+                    <div className="space-y-2">
+                      {viralityReport.metrics.map((m, i) => (
+                        <div key={i} className="p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.06] space-y-1 text-xs">
+                          <div className="flex justify-between font-semibold text-[11px]">
+                            <span className="text-white">{m.name}</span>
+                            <span className="text-cyan-400 font-mono">{m.score}/{m.maxScore}</span>
+                          </div>
+                          <div className="w-full bg-black/40 rounded-full h-1.5 overflow-hidden">
+                            <div
+                              className="h-full bg-cyan-400 rounded-full"
+                              style={{ width: `${(m.score / m.maxScore) * 100}%` }}
+                            />
+                          </div>
+                          <p className="text-[10px] text-slate-400 leading-snug">{m.feedback}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Actionable Recommendations */}
+                    {viralityReport.recommendations.length > 0 && (
+                      <div className="space-y-2 pt-2 border-t border-white/[0.06]">
+                        <span className="text-[10px] font-bold text-cyan-300 uppercase tracking-wider block">
+                          Actionable Retention Fixes
+                        </span>
+                        {viralityReport.recommendations.map((rec) => (
+                          <div
+                            key={rec.id}
+                            className="p-2.5 rounded-xl bg-cyan-950/20 border border-cyan-500/30 flex items-center justify-between gap-2"
+                          >
+                            <div className="overflow-hidden">
+                              <p className="text-[11px] font-bold text-white">{rec.title}</p>
+                              <p className="text-[9px] text-slate-400 leading-tight">{rec.reason}</p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (rec.actionType === 'enable_subs') setActiveTab('subtitles');
+                                if (rec.actionType === 'add_broll') setActiveTab('stock');
+                                if (rec.actionType === 'auto_foley') setActiveTab('sfx');
+                                if (rec.actionType === 'enable_ducking') {
+                                  setAutoDuckingEnabled(true);
+                                  toast.success('Auto-Ducking Enabled!');
+                                }
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-[10px] flex-shrink-0"
+                            >
+                              {rec.actionLabel}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'seo' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <BookOpen className="w-3.5 h-3.5 text-amber-400" /> Chapters & Viral SEO
+                  </h4>
+                  <span className="text-[10px] text-amber-400 font-mono font-semibold">Metadata</span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleGenerateSEO}
+                  disabled={isGeneratingSEO}
+                  className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-purple-500/20 border border-amber-500/40 hover:border-amber-400 text-xs font-bold text-white flex items-center justify-center gap-2 shadow-sm transition-all disabled:opacity-50"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                  <span>{isGeneratingSEO ? 'Generating Metadata...' : 'Generate YouTube Chapters & SEO'}</span>
+                </button>
+
+                {seoMetadata && (
+                  <div className="space-y-3">
+                    {/* Title Variants */}
+                    <div className="space-y-1.5 p-3 rounded-2xl bg-white/[0.03] border border-white/[0.06]">
+                      <span className="text-[10px] font-bold text-amber-300 uppercase tracking-wider block">
+                        Viral Title Options
+                      </span>
+                      {[
+                        { label: 'Curiosity', text: seoMetadata.titles.curiosity },
+                        { label: 'High Value', text: seoMetadata.titles.highValue },
+                        { label: 'Contrarian', text: seoMetadata.titles.contrarian },
+                      ].map((t, idx) => (
+                        <div key={idx} className="p-2 rounded-xl bg-black/40 border border-white/5 flex items-center justify-between gap-2">
+                          <p className="text-[11px] text-white font-medium leading-snug">{t.text}</p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard.writeText(t.text);
+                              toast.success(`Copied "${t.label}" title!`);
+                            }}
+                            className="p-1 rounded bg-white/10 hover:bg-white/20 text-slate-300 flex-shrink-0"
+                            title="Copy Title"
+                          >
+                            <Copy className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Timestamped Chapters */}
+                    <div className="space-y-1.5 p-3 rounded-2xl bg-white/[0.03] border border-white/[0.06]">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-amber-300 uppercase tracking-wider">
+                          YouTube Chapters ({seoMetadata.chapters.length})
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(seoMetadata.chaptersFormattedText);
+                            toast.success('Copied all chapters!');
+                          }}
+                          className="text-[10px] text-amber-400 hover:text-amber-300 font-mono font-bold flex items-center gap-1"
+                        >
+                          <Copy className="w-3 h-3" /> Copy All
+                        </button>
+                      </div>
+                      <div className="space-y-1 font-mono text-[10px] text-slate-300 p-2 rounded-xl bg-black/40 border border-white/5">
+                        {seoMetadata.chapters.map((ch) => (
+                          <div key={ch.id} className="flex gap-2">
+                            <span className="text-amber-400 font-bold">{ch.timestamp}</span>
+                            <span className="text-white">{ch.title}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Trending Hashtags */}
+                    <div className="space-y-1.5 p-3 rounded-2xl bg-white/[0.03] border border-white/[0.06]">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-amber-300 uppercase tracking-wider">
+                          Hashtag Bundle
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(seoMetadata.hashtagsFormattedText);
+                            toast.success('Copied hashtags!');
+                          }}
+                          className="text-[10px] text-amber-400 hover:text-amber-300 font-mono font-bold flex items-center gap-1"
+                        >
+                          <Copy className="w-3 h-3" /> Copy
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-cyan-300 font-mono p-2 rounded-xl bg-black/40 border border-white/5">
+                        {seoMetadata.hashtagsFormattedText}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
