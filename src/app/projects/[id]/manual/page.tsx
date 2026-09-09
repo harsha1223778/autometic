@@ -26,6 +26,10 @@ import {
   Check,
   RotateCcw,
   Maximize,
+  Image as ImageIcon,
+  Film,
+  Plus,
+  UploadCloud,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -35,6 +39,15 @@ interface EditOperation {
   name: string;
   timestamp: string;
   details: Record<string, any>;
+}
+
+export interface MediaAsset {
+  id: string;
+  name: string;
+  url: string;
+  type: 'video' | 'image';
+  duration?: number;
+  thumbnailUrl?: string;
 }
 
 export default function ManualStudioPage() {
@@ -52,7 +65,13 @@ export default function ManualStudioPage() {
   const [duration, setDuration] = useState(30);
 
   // Studio Tools & Properties State
-  const [activeTab, setActiveTab] = useState<'trim' | 'audio' | 'subtitles' | 'filters'>('trim');
+  const [activeTab, setActiveTab] = useState<'media' | 'trim' | 'audio' | 'subtitles' | 'filters'>('media');
+  const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
+  const [selectedOverlayPosition, setSelectedOverlayPosition] = useState<'top-right' | 'center' | 'lower-third'>('top-right');
+  const [overlayDuration, setOverlayDuration] = useState(4.0);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+  const studioFileInputRef = useRef<HTMLInputElement>(null);
+
   const [trimStart, setTrimStart] = useState(0);
   const [trimEnd, setTrimEnd] = useState(30);
   const [originalVolume, setOriginalVolume] = useState(100);
@@ -99,6 +118,52 @@ export default function ManualStudioPage() {
             setDuration(data.project.duration);
             setTrimEnd(data.project.duration);
           }
+
+          // Fetch edit plan to load operations and any stored media assets
+          fetch(`/api/projects/${projectId}/edit-plan`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((plan) => {
+              let existingAssets: MediaAsset[] = [];
+              if (plan?.operations && Array.isArray(plan.operations)) {
+                setOperations(plan.operations);
+                const assetOp = plan.operations.find((o: any) => o.type === 'media_assets_imported');
+                if (assetOp?.assets && Array.isArray(assetOp.assets)) {
+                  existingAssets = assetOp.assets;
+                }
+              }
+
+              if (existingAssets.length === 0) {
+                setMediaAssets([
+                  {
+                    id: 'asset-main',
+                    name: data.project.title || 'Primary Video Clip',
+                    url: data.project.originalVideoUrl,
+                    type: 'video',
+                    duration: data.project.duration || 30.0,
+                    thumbnailUrl: data.project.thumbnailUrl,
+                  },
+                  {
+                    id: 'stock-broll-1',
+                    name: 'Cinematic B-Roll Overlay',
+                    url: 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=1200&auto=format&fit=crop&q=80',
+                    type: 'image',
+                    duration: 5.0,
+                    thumbnailUrl: 'https://images.unsplash.com/photo-1503899036084-c55cdd92da26?w=600&auto=format&fit=crop&q=80',
+                  },
+                  {
+                    id: 'stock-broll-2',
+                    name: 'Studio Title Card Graphic',
+                    url: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80',
+                    type: 'image',
+                    duration: 5.0,
+                    thumbnailUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80',
+                  },
+                ]);
+              } else {
+                setMediaAssets(existingAssets);
+              }
+            })
+            .catch(() => {});
         }
         setLoading(false);
       })
@@ -144,6 +209,65 @@ export default function ManualStudioPage() {
     setRedoStack(rest);
     setOperations((prev) => [...prev, opToRedo]);
     toast.info(`Redid: ${opToRedo.name}`);
+  };
+
+  const handleStudioMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    setUploadingMedia(true);
+    try {
+      const formData = new FormData();
+      Array.from(e.target.files).forEach((f) => formData.append('files', f));
+
+      const res = await fetch('/api/upload/media', {
+        method: 'POST',
+        body: formData,
+      });
+      if (!res.ok) throw new Error('Upload failed');
+      const data = await res.json();
+      const newAssets: MediaAsset[] = data.media || [];
+      setMediaAssets((prev) => [...prev, ...newAssets]);
+      addOperation('media_assets_imported', `Imported ${newAssets.length} media asset(s)`, {
+        count: newAssets.length,
+        names: newAssets.map((a) => a.name),
+      });
+      toast.success(`Imported ${newAssets.length} new media asset(s) to studio!`);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to import media');
+    } finally {
+      setUploadingMedia(false);
+    }
+  };
+
+  const handleAddImageOverlay = (asset: MediaAsset) => {
+    const start = parseFloat(currentTime.toFixed(1));
+    addOperation('overlay_image', `Overlay Image: ${asset.name}`, {
+      assetId: asset.id,
+      name: asset.name,
+      url: asset.url,
+      thumbnailUrl: asset.thumbnailUrl,
+      startTime: start,
+      duration: overlayDuration,
+      position: selectedOverlayPosition,
+    });
+    toast.success(`Added image overlay at ${formatTime(start)} (${overlayDuration}s)`);
+  };
+
+  const handleAddBrollCutaway = (asset: MediaAsset) => {
+    const start = parseFloat(currentTime.toFixed(1));
+    addOperation('broll_clip', `B-Roll Cutaway: ${asset.name}`, {
+      assetId: asset.id,
+      name: asset.name,
+      url: asset.url,
+      thumbnailUrl: asset.thumbnailUrl,
+      startTime: start,
+      duration: 5.0,
+    });
+    toast.success(`Added B-roll cutaway at ${formatTime(start)} (5s)`);
+  };
+
+  const handleRemoveOverlayOp = (opId: string) => {
+    setOperations((prev) => prev.filter((o) => o.id !== opId));
+    toast.info('Removed overlay from timeline');
   };
 
   const handleSplitClip = () => {
@@ -283,6 +407,7 @@ export default function ManualStudioPage() {
           {/* Tool Navigation Tabs */}
           <div className="flex border-b border-white/[0.08] p-2 gap-1">
             {[
+              { id: 'media', label: 'Media', icon: ImageIcon },
               { id: 'trim', label: 'Trim', icon: Scissors },
               { id: 'audio', label: 'Audio', icon: Volume2 },
               { id: 'subtitles', label: 'Subs', icon: Type },
@@ -293,9 +418,9 @@ export default function ManualStudioPage() {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id as any)}
-                  className={`flex-1 py-2 px-2 rounded-xl text-xs font-medium flex flex-col items-center gap-1 transition-all ${
+                  className={`flex-1 py-2 px-1 rounded-xl text-[11px] font-medium flex flex-col items-center gap-1 transition-all ${
                     activeTab === tab.id
-                      ? 'bg-purple-600/20 text-purple-300 border border-purple-500/30'
+                      ? 'bg-purple-600/20 text-purple-300 border border-purple-500/30 font-bold'
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
@@ -308,6 +433,153 @@ export default function ManualStudioPage() {
 
           {/* Active Tool Parameters */}
           <div className="flex-1 overflow-y-auto p-4 space-y-5">
+            {activeTab === 'media' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider">Project Media Assets</h4>
+                  <span className="text-[10px] text-cyan-400 font-mono font-semibold">{mediaAssets.length} Items</span>
+                </div>
+
+                {/* In-Studio Upload Button */}
+                <input
+                  ref={studioFileInputRef}
+                  type="file"
+                  multiple
+                  accept="video/*,image/*"
+                  className="hidden"
+                  onChange={handleStudioMediaUpload}
+                />
+                <button
+                  type="button"
+                  onClick={() => studioFileInputRef.current?.click()}
+                  disabled={uploadingMedia}
+                  className="w-full p-3 rounded-2xl bg-gradient-to-r from-purple-600/20 to-cyan-500/20 hover:from-purple-600/30 hover:to-cyan-500/30 border border-cyan-500/30 text-cyan-300 text-xs font-semibold flex items-center justify-center gap-2 transition-all"
+                >
+                  <UploadCloud className="w-4 h-4 text-cyan-400" />
+                  <span>{uploadingMedia ? 'Uploading Files...' : 'Upload Images / Videos'}</span>
+                </button>
+
+                {/* Overlay Position & Duration Controls */}
+                <div className="p-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] space-y-2.5">
+                  <label className="text-[11px] font-semibold text-slate-300 block">Image Overlay Settings</label>
+                  <div className="grid grid-cols-3 gap-1 text-[10px]">
+                    {[
+                      { id: 'top-right', label: 'Top Right' },
+                      { id: 'center', label: 'Center' },
+                      { id: 'lower-third', label: 'Lower 3rd' },
+                    ].map((pos) => (
+                      <button
+                        key={pos.id}
+                        type="button"
+                        onClick={() => setSelectedOverlayPosition(pos.id as any)}
+                        className={`py-1 px-1.5 rounded-lg border font-medium text-center transition-all ${
+                          selectedOverlayPosition === pos.id
+                            ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200 font-bold'
+                            : 'bg-white/[0.02] border-white/10 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {pos.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] pt-1">
+                    <span className="text-slate-400">Duration</span>
+                    <span className="text-cyan-300 font-mono font-bold">{overlayDuration}s</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={15}
+                    step={0.5}
+                    value={overlayDuration}
+                    onChange={(e) => setOverlayDuration(parseFloat(e.target.value))}
+                    className="w-full accent-cyan-400 h-1"
+                  />
+                </div>
+
+                {/* Media Asset List */}
+                <div className="space-y-2">
+                  <label className="text-[11px] text-slate-400 block font-medium">Available Assets (Click to insert at {formatTime(currentTime)})</label>
+                  <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                    {mediaAssets.map((asset) => (
+                      <div
+                        key={asset.id}
+                        className="p-2.5 rounded-xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.08] flex items-center gap-2.5 transition-all group"
+                      >
+                        <div className="w-12 h-10 rounded-lg bg-black overflow-hidden relative flex-shrink-0 flex items-center justify-center">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={asset.thumbnailUrl || asset.url}
+                            alt={asset.name}
+                            className="w-full h-full object-cover"
+                          />
+                          <span
+                            className={`absolute top-0.5 left-0.5 text-[7px] font-extrabold uppercase px-1 rounded ${
+                              asset.type === 'video' ? 'bg-purple-600 text-white' : 'bg-cyan-600 text-white'
+                            }`}
+                          >
+                            {asset.type}
+                          </span>
+                        </div>
+
+                        <div className="flex-1 overflow-hidden">
+                          <p className="text-[11px] font-semibold text-white truncate">{asset.name}</p>
+                          <span className="text-[9px] text-slate-400">{asset.type === 'video' ? `${asset.duration || 30}s Clip` : 'Still Image'}</span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (asset.type === 'image') {
+                              handleAddImageOverlay(asset);
+                            } else {
+                              handleAddBrollCutaway(asset);
+                            }
+                          }}
+                          className="px-2 py-1 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/40 text-[10px] font-semibold text-purple-200 transition-all flex items-center gap-1"
+                          title="Insert onto timeline at current playhead"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Insert</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Timeline Active Overlays */}
+                {operations.some((op) => op.type === 'overlay_image' || op.type === 'broll_clip') && (
+                  <div className="pt-2 border-t border-white/[0.08] space-y-2">
+                    <label className="text-[11px] font-semibold text-cyan-300 block">Active Timeline Overlays</label>
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                      {operations
+                        .filter((op) => op.type === 'overlay_image' || op.type === 'broll_clip')
+                        .map((op) => (
+                          <div
+                            key={op.id}
+                            className="p-2 rounded-lg bg-cyan-950/20 border border-cyan-500/30 flex items-center justify-between text-[10px]"
+                          >
+                            <div className="overflow-hidden pr-2">
+                              <span className="font-semibold text-white truncate block">{op.name}</span>
+                              <span className="text-slate-400 font-mono">{op.details?.startTime}s - {Number(op.details?.startTime) + Number(op.details?.duration)}s</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveOverlayOp(op.id)}
+                              className="p-1 rounded text-slate-400 hover:text-rose-400 transition-colors"
+                              title="Delete from timeline"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {activeTab === 'trim' && (
               <div className="space-y-4">
                 <h4 className="text-xs font-bold text-white uppercase tracking-wider">Clip Editing</h4>
@@ -569,7 +841,7 @@ export default function ManualStudioPage() {
               {/* In-Video Burnt Subtitle Overlay Preview */}
               {subtitleText && (
                 <div
-                  className={`absolute left-0 right-0 px-6 text-center pointer-events-none ${
+                  className={`absolute left-0 right-0 px-6 text-center pointer-events-none z-30 ${
                     subtitlePosition === 'top'
                       ? 'top-8'
                       : subtitlePosition === 'center'
@@ -585,6 +857,57 @@ export default function ManualStudioPage() {
                   </span>
                 </div>
               )}
+
+              {/* Active Image Overlays & B-Roll Cutaways Preview */}
+              {operations
+                .filter((op) => (op.type === 'overlay_image' || op.type === 'broll_clip') && op.details)
+                .filter(
+                  (op) =>
+                    currentTime >= Number(op.details.startTime) &&
+                    currentTime <= Number(op.details.startTime) + Number(op.details.duration)
+                )
+                .map((op) => {
+                  if (op.type === 'overlay_image') {
+                    const pos = op.details.position || 'top-right';
+                    const posClasses =
+                      pos === 'top-right'
+                        ? 'top-4 right-4 max-w-[180px]'
+                        : pos === 'center'
+                        ? 'top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 max-w-[280px]'
+                        : 'bottom-12 left-6 max-w-[200px]';
+
+                    return (
+                      <div
+                        key={op.id}
+                        className={`absolute z-20 rounded-xl overflow-hidden shadow-2xl border-2 border-cyan-400/80 bg-black/70 backdrop-blur-sm pointer-events-none transition-all duration-200 animate-in fade-in zoom-in-95 ${posClasses}`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={op.details.url} alt={op.details.name} className="w-full h-auto object-cover max-h-48" />
+                        <div className="bg-black/90 px-2 py-1 flex items-center justify-between">
+                          <span className="text-[9px] text-cyan-300 font-bold truncate">
+                            {op.details.name}
+                          </span>
+                          <span className="text-[8px] bg-cyan-600/60 text-white font-mono px-1 rounded">IMAGE</span>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (op.type === 'broll_clip') {
+                    return (
+                      <div
+                        key={op.id}
+                        className="absolute top-4 left-4 z-20 w-48 aspect-video rounded-xl overflow-hidden shadow-2xl border-2 border-purple-500/80 bg-black pointer-events-none transition-all duration-200 animate-in fade-in"
+                      >
+                        <video src={op.details.url} autoPlay muted loop className="w-full h-full object-cover" />
+                        <span className="absolute bottom-1 left-1 text-[8px] font-extrabold bg-purple-600 text-white px-1.5 py-0.5 rounded shadow">
+                          B-ROLL CUTAWAY
+                        </span>
+                      </div>
+                    );
+                  }
+                  return null;
+                })}
             </div>
           </div>
 
@@ -619,7 +942,7 @@ export default function ManualStudioPage() {
           </div>
 
           {/* Interactive Multi-Track Timeline Simulation */}
-          <div className="h-36 bg-[#0B0F1C] border-t border-white/[0.08] p-4 flex flex-col justify-between select-none">
+          <div className="h-44 bg-[#0B0F1C] border-t border-white/[0.08] p-4 flex flex-col justify-between select-none">
             {/* Playhead Scrubbing Rail */}
             <div
               className="relative w-full h-4 cursor-pointer"
@@ -639,10 +962,41 @@ export default function ManualStudioPage() {
               />
             </div>
 
+            {/* Overlays / B-Roll Track Lane */}
+            <div className="flex items-center gap-2 text-[10px] text-slate-400">
+              <span className="w-12 font-mono text-[9px] text-cyan-400 font-bold">OVERLAYS</span>
+              <div className="flex-1 h-6 rounded-md bg-cyan-950/20 border border-cyan-500/30 relative flex items-center px-1 overflow-hidden">
+                {operations
+                  .filter((op) => (op.type === 'overlay_image' || op.type === 'broll_clip') && op.details)
+                  .map((op, i) => {
+                    const startPct = ((Number(op.details.startTime) || 0) / (duration || 1)) * 100;
+                    const widthPct = Math.max(5, ((Number(op.details.duration) || 3) / (duration || 1)) * 100);
+                    return (
+                      <div
+                        key={op.id || i}
+                        className={`absolute top-0.5 bottom-0.5 rounded px-1.5 flex items-center gap-1 text-[8px] font-bold truncate border shadow-sm ${
+                          op.type === 'overlay_image'
+                            ? 'bg-cyan-500/30 border-cyan-400 text-cyan-200'
+                            : 'bg-purple-500/30 border-purple-400 text-purple-200'
+                        }`}
+                        style={{ left: `${startPct}%`, width: `${widthPct}%` }}
+                        title={`${op.name} (${op.details.startTime}s - ${Number(op.details.startTime) + Number(op.details.duration)}s)`}
+                      >
+                        <span className="opacity-75">{op.type === 'overlay_image' ? 'IMG' : 'B-ROLL'}:</span>
+                        <span className="truncate">{op.details.name || op.name}</span>
+                      </div>
+                    );
+                  })}
+                {operations.filter((op) => op.type === 'overlay_image' || op.type === 'broll_clip').length === 0 && (
+                  <span className="text-[9px] text-slate-500 italic pl-1">No active image overlays or B-roll clips. Insert from Media tab.</span>
+                )}
+              </div>
+            </div>
+
             {/* Video Track Lane */}
             <div className="flex items-center gap-2 text-[10px] text-slate-400">
               <span className="w-12 font-mono">VIDEO</span>
-              <div className="flex-1 h-7 rounded-lg bg-purple-950/40 border border-purple-500/30 relative flex items-center px-2 overflow-hidden">
+              <div className="flex-1 h-6 rounded-md bg-purple-950/40 border border-purple-500/30 relative flex items-center px-2 overflow-hidden">
                 <span className="text-purple-300 font-semibold truncate">{project?.title || 'Clip Track 1'}</span>
                 {/* Visual clip marker trims */}
                 <div

@@ -109,6 +109,7 @@ export default function AIAssistantPage() {
 
   const suggestedPrompts = [
     'Make this vlog look professional.',
+    'Overlay images and insert B-roll cutaways.',
     'Remove silent parts and add subtitles.',
     'Turn this into a 30-second Instagram Reel.',
     'Add calm background music and clean the audio.',

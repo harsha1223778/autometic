@@ -9,6 +9,20 @@ const createProjectSchema = z.object({
   thumbnailUrl: z.string().optional().nullable(),
   duration: z.number().nonnegative().optional().default(30.0),
   mode: z.enum(['auto', 'manual', 'assistant']).optional().default('auto'),
+  mediaAssets: z
+    .array(
+      z.object({
+        id: z.string().optional(),
+        url: z.string(),
+        name: z.string(),
+        type: z.enum(['video', 'image']),
+        fileSize: z.number().optional(),
+        duration: z.number().optional(),
+        thumbnailUrl: z.string().optional().nullable(),
+      })
+    )
+    .optional()
+    .default([]),
 });
 
 export async function GET(req: NextRequest) {
@@ -116,7 +130,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { title, originalVideoUrl, thumbnailUrl, duration, mode } = result.data;
+    const { title, originalVideoUrl, thumbnailUrl, duration, mode, mediaAssets } = result.data;
 
     const project = await prisma.project.create({
       data: {
@@ -129,6 +143,20 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    const initialOps: any[] = [
+      { type: 'remove_silence', enabled: true, threshold_seconds: 1.5 },
+      { type: 'generate_subtitles', enabled: true, language: 'en', style: 'modern_white_bottom' },
+      { type: 'normalize_audio', enabled: true, target_lufs: -14 },
+    ];
+
+    if (mediaAssets && mediaAssets.length > 0) {
+      initialOps.push({
+        type: 'media_assets_imported',
+        enabled: true,
+        assets: mediaAssets,
+      });
+    }
+
     // Create initial edit job for tracking
     const editJob = await prisma.editJob.create({
       data: {
@@ -136,11 +164,7 @@ export async function POST(req: NextRequest) {
         mode,
         status: 'ready',
         progress: 0,
-        operations: JSON.stringify([
-          { type: 'remove_silence', enabled: true, threshold_seconds: 1.5 },
-          { type: 'generate_subtitles', enabled: true, language: 'en', style: 'modern_white_bottom' },
-          { type: 'normalize_audio', enabled: true, target_lufs: -14 },
-        ]),
+        operations: JSON.stringify(initialOps),
       },
     });
 
