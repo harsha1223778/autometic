@@ -40,6 +40,9 @@ import {
   RefreshCw,
   Loader2,
   Crop,
+  Mic,
+  Volume1,
+  Share2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import KaraokeSubtitles from '@/components/studio/KaraokeSubtitles';
@@ -51,6 +54,9 @@ import {
   DetectedBRollSuggestion,
 } from '@/lib/stockMedia';
 import { renderStudioComposition, downloadRenderedBlob } from '@/lib/videoRenderer';
+import { VOICE_PROFILES, speakTextWithProfile, estimateSpeechDuration, VoiceProfile } from '@/lib/ttsEngine';
+import { SOUND_EFFECTS, playSoundEffect, autoDetectFoleyMoments, SoundEffectItem, FoleySuggestion } from '@/lib/sfxLibrary';
+import ThumbnailModal from '@/components/studio/ThumbnailModal';
 
 const isImageMedia = (url?: string) => {
   if (!url) return false;
@@ -89,7 +95,7 @@ export default function ManualStudioPage() {
   const [duration, setDuration] = useState(30);
 
   // Studio Tools & Properties State
-  const [activeTab, setActiveTab] = useState<'media' | 'stock' | 'trim' | 'audio' | 'subtitles' | 'filters' | 'reframe'>('media');
+  const [activeTab, setActiveTab] = useState<'media' | 'stock' | 'voice' | 'sfx' | 'reframe' | 'trim' | 'audio' | 'subtitles' | 'filters'>('media');
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
   const [selectedOverlayPosition, setSelectedOverlayPosition] = useState<'top-right' | 'center' | 'lower-third'>('top-right');
   const [overlayDuration, setOverlayDuration] = useState(4.0);
@@ -100,6 +106,17 @@ export default function ManualStudioPage() {
   const [stockSearch, setStockSearch] = useState('');
   const [selectedStockCategory, setSelectedStockCategory] = useState<string>('all');
   const [brollSuggestions, setBrollSuggestions] = useState<DetectedBRollSuggestion[]>([]);
+
+  // AI Voiceover & TTS State
+  const [selectedVoice, setSelectedVoice] = useState('alex-energetic');
+  const [voiceoverScript, setVoiceoverScript] = useState('Transform your content into viral high engagement videos with EditFlow AI');
+  const [isSpeaking, setIsSpeaking] = useState(false);
+
+  // Sound Effects & Foley State
+  const [foleySuggestions, setFoleySuggestions] = useState<FoleySuggestion[]>([]);
+
+  // Thumbnail Generator Studio State
+  const [showThumbnailModal, setShowThumbnailModal] = useState(false);
 
   // Trim & Audio State
   const [trimStart, setTrimStart] = useState(0);
@@ -411,6 +428,70 @@ export default function ManualStudioPage() {
     }, 1200);
   };
 
+  const handleAuditionVoice = () => {
+    if (!voiceoverScript.trim()) return;
+    setIsSpeaking(true);
+    speakTextWithProfile(voiceoverScript, selectedVoice, () => {
+      setIsSpeaking(false);
+    });
+  };
+
+  const handleGenerateVoiceoverToTimeline = () => {
+    if (!voiceoverScript.trim()) return;
+    const estDuration = estimateSpeechDuration(voiceoverScript, selectedVoice);
+    const start = parseFloat(currentTime.toFixed(1));
+    const profile = VOICE_PROFILES.find((p) => p.id === selectedVoice);
+
+    addOperation('voiceover_tts', `AI Voice: ${profile?.name || 'Speech'}`, {
+      voiceId: selectedVoice,
+      text: voiceoverScript,
+      startTime: start,
+      duration: estDuration,
+    });
+
+    // Also sync with subtitles
+    setSubtitleText(voiceoverScript);
+    setSubtitleStyle('hormozi');
+
+    toast.success(`Generated ${estDuration}s AI voiceover track at ${formatTime(start)}!`);
+    handleAuditionVoice();
+  };
+
+  const handlePlaySFX = (sfxId: string) => {
+    playSoundEffect(sfxId, 0.7);
+  };
+
+  const handleInsertSFXToTimeline = (sfx: SoundEffectItem) => {
+    const start = parseFloat(currentTime.toFixed(1));
+    addOperation('sfx_insert', `SFX: ${sfx.name}`, {
+      sfxId: sfx.id,
+      name: sfx.name,
+      startTime: start,
+      duration: sfx.duration,
+    });
+    playSoundEffect(sfx.id, 0.7);
+    toast.success(`Placed "${sfx.name}" at ${formatTime(start)}`);
+  };
+
+  const handleAutoFoley = () => {
+    const suggestions = autoDetectFoleyMoments(operations, subtitleText, duration);
+    setFoleySuggestions(suggestions);
+    toast.success(`Auto-Foley identified ${suggestions.length} sound effect cues!`);
+  };
+
+  const handleApplyFoleySuggestion = (sug: FoleySuggestion) => {
+    addOperation('sfx_insert', `Auto-Foley: ${sug.sfxItem.name}`, {
+      sfxId: sug.sfxItem.id,
+      name: sug.sfxItem.name,
+      startTime: sug.timestamp,
+      duration: sug.sfxItem.duration,
+      reason: sug.reason,
+    });
+    playSoundEffect(sug.sfxItem.id, 0.7);
+    toast.success(`Inserted ${sug.sfxItem.name} at ${formatTime(sug.timestamp)}`);
+    setFoleySuggestions((prev) => prev.filter((s) => s.timestamp !== sug.timestamp));
+  };
+
   const handleShiftOverlay = (opId: string, deltaSeconds: number) => {
     setOperations((prev) =>
       prev.map((op) => {
@@ -597,6 +678,22 @@ export default function ManualStudioPage() {
             {savingDraft ? 'Saving...' : 'Save Draft'}
           </button>
           <button
+            onClick={() => setShowThumbnailModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] text-xs font-medium text-slate-200 transition-all flex items-center gap-1.5"
+            title="Generate High-Res Viral Thumbnail"
+          >
+            <ImageIcon className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden sm:inline">Thumbnail</span>
+          </button>
+          <button
+            onClick={() => router.push(`/share/${projectId}`)}
+            className="px-3 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] text-xs font-medium text-slate-200 transition-all flex items-center gap-1.5"
+            title="View & Share Public Link"
+          >
+            <Share2 className="w-3.5 h-3.5 text-purple-400" />
+            <span className="hidden sm:inline">Share</span>
+          </button>
+          <button
             onClick={() => setShowExportModal(true)}
             disabled={isExporting || isRenderingLocal}
             className="px-4 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-cyan-500 hover:from-purple-500 hover:to-cyan-400 text-xs font-semibold text-white shadow-md shadow-purple-600/20 transition-all flex items-center gap-1.5 disabled:opacity-50"
@@ -616,10 +713,12 @@ export default function ManualStudioPage() {
         {/* Left Tools Panel */}
         <div className="w-80 bg-[#080B14]/90 border-r border-white/[0.08] flex flex-col">
           {/* Tool Navigation Tabs */}
-          <div className="grid grid-cols-4 sm:grid-cols-7 border-b border-white/[0.08] p-1.5 gap-1">
+          <div className="grid grid-cols-5 sm:grid-cols-9 border-b border-white/[0.08] p-1 gap-1">
             {[
               { id: 'media', label: 'Media', icon: ImageIcon },
               { id: 'stock', label: 'B-Roll', icon: Flame },
+              { id: 'voice', label: 'Voice', icon: Mic },
+              { id: 'sfx', label: 'SFX', icon: Volume1 },
               { id: 'reframe', label: 'Reframe', icon: Crop },
               { id: 'trim', label: 'Trim', icon: Scissors },
               { id: 'audio', label: 'Audio', icon: Volume2 },
@@ -910,6 +1009,184 @@ export default function ManualStudioPage() {
                         onClick={() => handleInsertStockMedia(item)}
                         className="px-2 py-1 rounded-lg bg-orange-600/30 hover:bg-orange-600/50 border border-orange-500/40 text-[10px] font-bold text-orange-200 transition-all flex items-center gap-1"
                         title="Insert onto timeline at current cursor"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Insert</span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'voice' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <Mic className="w-3.5 h-3.5 text-purple-400" /> AI Voiceover Studio
+                  </h4>
+                  <span className="text-[10px] text-purple-300 font-mono font-semibold">4 Voices</span>
+                </div>
+
+                {/* Voice Profile Selector */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] text-slate-400 font-medium block">Select AI Voice Personality</label>
+                  <div className="space-y-2">
+                    {VOICE_PROFILES.map((vp) => (
+                      <button
+                        key={vp.id}
+                        type="button"
+                        onClick={() => setSelectedVoice(vp.id)}
+                        className={`w-full p-2.5 rounded-xl border text-left transition-all ${
+                          selectedVoice === vp.id
+                            ? 'bg-purple-600/25 border-purple-500 text-white shadow-md shadow-purple-900/20'
+                            : 'bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-white hover:bg-white/[0.04]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className="font-bold text-xs text-white flex items-center gap-1.5">
+                            <span>{vp.avatar}</span> {vp.name}
+                          </span>
+                          <span className="text-[9px] font-semibold text-purple-300 bg-purple-500/10 px-1.5 py-0.5 rounded border border-purple-500/20">
+                            {vp.badge}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 leading-snug">{vp.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Voice Script Textarea */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center text-[11px]">
+                    <span className="text-slate-400">Voiceover Script</span>
+                    <span className="text-purple-300 font-mono">
+                      ~{estimateSpeechDuration(voiceoverScript, selectedVoice)}s duration
+                    </span>
+                  </div>
+                  <textarea
+                    rows={3}
+                    value={voiceoverScript}
+                    onChange={(e) => setVoiceoverScript(e.target.value)}
+                    placeholder="Type words you want the AI voice to speak..."
+                    className="w-full p-2.5 rounded-xl bg-white/[0.04] border border-white/[0.08] text-xs text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+
+                {/* Audition & Generate Buttons */}
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleAuditionVoice}
+                    disabled={isSpeaking}
+                    className="py-2.5 px-3 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 text-xs font-semibold text-white flex items-center justify-center gap-1.5 transition-all disabled:opacity-50"
+                  >
+                    <Volume2 className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>{isSpeaking ? 'Speaking...' : 'Audition Voice'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleGenerateVoiceoverToTimeline}
+                    className="py-2.5 px-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow-md shadow-purple-600/30 flex items-center justify-center gap-1.5 transition-all"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-cyan-300" />
+                    <span>Add to Timeline</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'sfx' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <Volume1 className="w-3.5 h-3.5 text-cyan-400" /> Sound Effects & Foley
+                  </h4>
+                  <span className="text-[10px] text-cyan-400 font-mono font-semibold">6 SFX</span>
+                </div>
+
+                {/* Auto-Foley AI Button */}
+                <button
+                  type="button"
+                  onClick={handleAutoFoley}
+                  className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-cyan-500/20 to-purple-500/20 border border-cyan-500/40 hover:border-cyan-400 text-xs font-semibold text-white flex items-center justify-center gap-2 shadow-sm transition-all"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-cyan-300 animate-pulse" />
+                  <span>Auto-Foley AI (Sync SFX to Cuts)</span>
+                </button>
+
+                {/* Suggested Foley Placements */}
+                {foleySuggestions.length > 0 && (
+                  <div className="space-y-2 p-3 rounded-2xl bg-cyan-950/20 border border-cyan-500/30">
+                    <span className="text-[10px] font-bold text-cyan-300 uppercase tracking-wider block">
+                      Auto-Foley Cues ({foleySuggestions.length})
+                    </span>
+                    <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                      {foleySuggestions.map((sug, i) => (
+                        <div
+                          key={i}
+                          className="p-2 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-between text-xs gap-2"
+                        >
+                          <div className="overflow-hidden">
+                            <p className="font-semibold text-white text-[11px] truncate flex items-center gap-1">
+                              <span>{sug.sfxItem.icon}</span> {sug.sfxItem.name}
+                            </p>
+                            <span className="text-[9px] text-cyan-400 font-mono">
+                              At {formatTime(sug.timestamp)} • {sug.reason}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handlePlaySFX(sug.sfxItem.id)}
+                              className="p-1 rounded bg-white/10 hover:bg-white/20 text-white"
+                              title="Test audio"
+                            >
+                              <Play className="w-3 h-3" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleApplyFoleySuggestion(sug)}
+                              className="px-2 py-1 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black text-[10px] font-bold"
+                            >
+                              Insert
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Sound Effects List */}
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                  {SOUND_EFFECTS.map((sfx) => (
+                    <div
+                      key={sfx.id}
+                      className="p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.06] hover:border-white/20 transition-all flex items-center justify-between gap-2.5"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handlePlaySFX(sfx.id)}
+                        className="w-8 h-8 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-300 flex items-center justify-center flex-shrink-0 transition-colors"
+                        title="Audition sound effect"
+                      >
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                      </button>
+
+                      <div className="flex-1 overflow-hidden">
+                        <p className="text-[11px] font-semibold text-white truncate flex items-center gap-1">
+                          <span>{sfx.icon}</span> {sfx.name}
+                        </p>
+                        <p className="text-[9px] text-slate-400 truncate">{sfx.description}</p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleInsertSFXToTimeline(sfx)}
+                        className="px-2 py-1 rounded-lg bg-cyan-600/30 hover:bg-cyan-600/50 border border-cyan-500/40 text-[10px] font-bold text-cyan-200 transition-all flex items-center gap-1"
+                        title="Insert at cursor"
                       >
                         <Plus className="w-3 h-3" />
                         <span>Insert</span>
@@ -1702,6 +1979,16 @@ export default function ManualStudioPage() {
           </div>
         </div>
       )}
+
+      {/* 1-Click Viral Thumbnail Generator Modal */}
+      <ThumbnailModal
+        isOpen={showThumbnailModal}
+        onClose={() => setShowThumbnailModal(false)}
+        videoElement={videoRef.current}
+        imageSrc={isImageMedia(project?.originalVideoUrl) ? project?.originalVideoUrl : null}
+        projectTitle={project?.title || 'Viral Video'}
+        aspectRatio={aspectRatio}
+      />
     </div>
   );
 }
