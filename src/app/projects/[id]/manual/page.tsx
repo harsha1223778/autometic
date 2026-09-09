@@ -115,6 +115,11 @@ import {
   StickerItem,
 } from '@/lib/stickerEngine';
 import { generateRetentionHeatmap, RetentionAnalysisReport } from '@/lib/retentionHeatmap';
+import { VOICE_PROFILES as VOICE_ISOLATOR_PROFILES, buildVoiceFilterGraph } from '@/lib/voiceIsolator';
+import { SPLIT_SCREEN_LAYOUTS, renderSplitScreenComposite } from '@/lib/splitScreen';
+import { SHAKE_PRESETS, calculateCameraShakeOffset } from '@/lib/motionBlur';
+import WebhookHubModal from '@/components/studio/WebhookHubModal';
+import { STORYBOARD_FRAMEWORKS, generateStoryboard, convertStoryboardToTimelineOperations, StoryboardScene } from '@/lib/storyboardDirector';
 
 const isImageMedia = (url?: string) => {
   if (!url) return false;
@@ -153,7 +158,7 @@ export default function ManualStudioPage() {
   const [duration, setDuration] = useState(30);
 
   // Studio Tools & Properties State
-  const [activeTab, setActiveTab] = useState<'media' | 'stock' | 'sequence' | 'voice' | 'script' | 'sfx' | 'transitions' | 'callouts' | 'stickers' | 'retention' | 'speed' | 'chroma' | 'coach' | 'seo' | 'reframe' | 'trim' | 'audio' | 'subtitles' | 'filters' | 'history'>('media');
+  const [activeTab, setActiveTab] = useState<'media' | 'stock' | 'sequence' | 'voice' | 'script' | 'sfx' | 'transitions' | 'callouts' | 'stickers' | 'retention' | 'speed' | 'chroma' | 'coach' | 'seo' | 'reframe' | 'trim' | 'audio' | 'subtitles' | 'filters' | 'history' | 'storyboard' | 'splitscreen' | 'shake'>('media');
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
   const [selectedOverlayPosition, setSelectedOverlayPosition] = useState<'top-right' | 'center' | 'lower-third'>('top-right');
   const [overlayDuration, setOverlayDuration] = useState(4.0);
@@ -253,6 +258,30 @@ export default function ManualStudioPage() {
 
   // 19. AI Audience Retention Graph & Heatmap State
   const [retentionReport, setRetentionReport] = useState<RetentionAnalysisReport | null>(null);
+
+  // 20. AI Voice Isolator & Studio Sound Denoise Console State
+  const [selectedVoiceFilterProfile, setSelectedVoiceFilterProfile] = useState<string>('podcast-warmth');
+  const [voiceIsolatorEnabled, setVoiceIsolatorEnabled] = useState<boolean>(false);
+
+  // 21. Split-Screen, PIP & Reaction Video Studio State
+  const [splitScreenLayout, setSplitScreenLayout] = useState<'none' | 'top-bottom' | 'side-by-side' | 'pip-circle' | 'pip-rect'>('none');
+  const [secondaryMediaUrl, setSecondaryMediaUrl] = useState<string>('https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80');
+
+  // 22. Dynamic Camera Shake Simulator State
+  const [activeCameraShake, setActiveCameraShake] = useState<{
+    type: 'quick-jolt' | 'bass-drop-impact' | 'earthquake-rumble' | 'handheld-micro';
+    startTime: number;
+    duration: number;
+  } | null>(null);
+
+  // 23. AI Storyboard & Multi-Scene Auto-Director State
+  const [storyboardTopic, setStoryboardTopic] = useState<string>('How to build high-growth short-form videos with AI');
+  const [selectedStoryboardFramework, setSelectedStoryboardFramework] = useState<string>('viral-hook-story');
+  const [storyboardScenes, setStoryboardScenes] = useState<StoryboardScene[]>([]);
+  const [isGeneratingStoryboard, setIsGeneratingStoryboard] = useState<boolean>(false);
+
+  // 24. Webhooks & Multi-Platform Automation Hub State
+  const [showWebhookModal, setShowWebhookModal] = useState<boolean>(false);
 
   // Trim & Audio State
   const [trimStart, setTrimStart] = useState(0);
@@ -1054,6 +1083,86 @@ export default function ManualStudioPage() {
     toast.success(`Added "${asset.name}" to sequence #${sequenceClips.length + 1}`);
   };
 
+  // 9. Camera Shake Simulator Handler
+  const handleTriggerCameraShake = (presetId: string) => {
+    const preset = SHAKE_PRESETS.find((p) => p.id === presetId);
+    const dur = preset?.defaultDuration || 0.4;
+    setActiveCameraShake({
+      type: presetId as any,
+      startTime: currentTime,
+      duration: dur,
+    });
+    const op: EditOperation = {
+      id: `op-shake-${Date.now()}`,
+      type: 'camera_shake',
+      name: `Camera Shake: ${preset?.name || presetId}`,
+      timestamp: new Date().toLocaleTimeString(),
+      details: { type: presetId, startTime: currentTime, duration: dur },
+    };
+    setOperations((prev) => [op, ...prev]);
+    toast.success(`💥 Camera Shake triggered: ${preset?.name || presetId}`);
+    setTimeout(() => {
+      setActiveCameraShake(null);
+    }, dur * 1000);
+  };
+
+  // 10. AI Storyboard & Multi-Scene Director Handlers
+  const handleGenerateStoryboard = () => {
+    setIsGeneratingStoryboard(true);
+    try {
+      const scenes = generateStoryboard(selectedStoryboardFramework, storyboardTopic, duration || 30);
+      setStoryboardScenes(scenes);
+      toast.success(`🎬 Generated ${scenes.length}-scene AI Storyboard!`);
+    } catch {
+      toast.error('Failed to generate storyboard');
+    } finally {
+      setIsGeneratingStoryboard(false);
+    }
+  };
+
+  const handleApplyStoryboardToTimeline = () => {
+    if (storyboardScenes.length === 0) {
+      toast.error('Generate a storyboard first');
+      return;
+    }
+    const newOps = convertStoryboardToTimelineOperations(storyboardScenes);
+    setOperations((prev) => [...newOps, ...prev]);
+    const combinedScript = storyboardScenes.map((s) => s.scriptText).join(' ');
+    setSubtitleText(combinedScript);
+    toast.success(`🚀 Applied ${storyboardScenes.length} scenes to timeline!`);
+  };
+
+  // 11. Split-Screen Layout Handler
+  const handleSelectSplitLayout = (layoutId: any) => {
+    setSplitScreenLayout(layoutId);
+    const layout = SPLIT_SCREEN_LAYOUTS.find((l) => l.id === layoutId);
+    const op: EditOperation = {
+      id: `op-split-${Date.now()}`,
+      type: 'split_screen',
+      name: `Split Screen: ${layout?.name || layoutId}`,
+      timestamp: new Date().toLocaleTimeString(),
+      details: { layout: layoutId, secondaryUrl: secondaryMediaUrl },
+    };
+    setOperations((prev) => [op, ...prev]);
+    toast.success(`📐 Split-Screen: ${layout?.name || layoutId}`);
+  };
+
+  // 12. Voice Isolator Profile Handler
+  const handleSelectVoiceProfile = (profileId: string) => {
+    setSelectedVoiceFilterProfile(profileId);
+    setVoiceIsolatorEnabled(true);
+    const prof = VOICE_ISOLATOR_PROFILES.find((p) => p.id === profileId);
+    const op: EditOperation = {
+      id: `op-voice-iso-${Date.now()}`,
+      type: 'voice_isolator',
+      name: `Voice Filter: ${prof?.name || profileId}`,
+      timestamp: new Date().toLocaleTimeString(),
+      details: { profile: profileId },
+    };
+    setOperations((prev) => [op, ...prev]);
+    toast.success(`🎙️ Vocal Profile: ${prof?.name || profileId}`);
+  };
+
   const handleInBrowserRender = async (presetAspect?: '16:9' | '9:16' | '1:1') => {
     const targetAspect = presetAspect || aspectRatio;
     setIsRenderingLocal(true);
@@ -1103,6 +1212,9 @@ export default function ManualStudioPage() {
       const outputBlob = await renderStudioComposition({
         videoElement: isImg ? null : videoRef.current,
         imageSrc: isImg ? mediaSrc : null,
+        secondaryMediaSrc: splitScreenLayout !== 'none' ? secondaryMediaUrl : null,
+        splitScreenLayout: splitScreenLayout !== 'none' ? splitScreenLayout : undefined,
+        cameraShake: activeCameraShake ? activeCameraShake : undefined,
         aspectRatio: targetAspect,
         reframeMode,
         filter: selectedFilter,
@@ -1281,6 +1393,14 @@ export default function ManualStudioPage() {
             <Share2 className="w-3.5 h-3.5 text-purple-400" />
             <span className="hidden sm:inline">Social Kit</span>
           </button>
+          <button
+            onClick={() => setShowWebhookModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-xs font-semibold text-emerald-300 border border-emerald-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+            title="Zapier, Make.com & Discord Webhook Automation Hub"
+          >
+            <Radio className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="hidden sm:inline">Webhooks</span>
+          </button>
           <div className="h-4 w-px bg-white/10 mx-1" />
           <button
             onClick={handleSaveDraft}
@@ -1347,6 +1467,9 @@ export default function ManualStudioPage() {
               { id: 'trim', label: 'Jumpcut', icon: Scissors },
               { id: 'audio', label: 'Audio', icon: Volume2 },
               { id: 'subtitles', label: 'Subs', icon: Type },
+              { id: 'storyboard', label: 'Storyboard', icon: Film },
+              { id: 'splitscreen', label: 'Split-Screen', icon: Split },
+              { id: 'shake', label: 'Shake FX', icon: Move },
               { id: 'history', label: 'Snapshots', icon: History },
             ].map((tab) => {
               const Icon = tab.icon;
@@ -2558,6 +2681,54 @@ export default function ManualStudioPage() {
                   />
                 </div>
 
+                {/* AI Voice Isolator & Studio Denoise Console */}
+                <div className="p-3.5 rounded-2xl bg-indigo-950/25 border border-indigo-500/30 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
+                      <Mic className="w-3.5 h-3.5 text-indigo-400" /> AI Voice Isolator & EQ
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setVoiceIsolatorEnabled(!voiceIsolatorEnabled);
+                        toast.success(voiceIsolatorEnabled ? 'Voice Isolator bypassed' : 'Voice Isolator enabled');
+                      }}
+                      className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full transition-all ${
+                        voiceIsolatorEnabled
+                          ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/50'
+                          : 'bg-white/10 text-slate-400 border border-white/10 hover:text-white'
+                      }`}
+                    >
+                      {voiceIsolatorEnabled ? 'ACTIVE (ISOLATED)' : 'ENABLE FILTER'}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-400 leading-snug">
+                    Web Audio parametric EQ curve eliminates HVAC hum, room reverb echo, and boosts speech clarity.
+                  </p>
+                  <div className="space-y-1.5">
+                    {VOICE_ISOLATOR_PROFILES.map((prof) => (
+                      <button
+                        key={prof.id}
+                        type="button"
+                        onClick={() => handleSelectVoiceProfile(prof.id)}
+                        className={`w-full p-2 rounded-xl text-left border transition-all ${
+                          selectedVoiceFilterProfile === prof.id
+                            ? 'bg-indigo-600/30 border-indigo-400 text-white shadow-sm'
+                            : 'bg-black/30 border-white/[0.06] text-slate-300 hover:bg-white/[0.04]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold">{prof.name}</span>
+                          <span className="text-[9px] font-mono uppercase text-indigo-300 bg-indigo-500/20 px-1.5 py-0.5 rounded">
+                            {prof.category}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-0.5 line-clamp-1">{prof.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="space-y-3 pt-3 border-t border-white/[0.06]">
                   <h5 className="text-xs font-semibold text-white flex items-center gap-1.5">
                     <Music className="w-3.5 h-3.5 text-purple-400" /> Background Music Track
@@ -3387,6 +3558,234 @@ export default function ManualStudioPage() {
                 </div>
               </div>
             )}
+
+            {activeTab === 'storyboard' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <Film className="w-3.5 h-3.5 text-amber-400" /> AI Storyboard & Director
+                  </h4>
+                  <span className="text-[10px] bg-amber-500/20 text-amber-300 font-mono px-2 py-0.5 rounded-full font-bold">
+                    Multi-Scene
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  Select a proven narrative framework to automatically generate pacing, shot descriptions, B-roll cues, and word-for-word scripts.
+                </p>
+
+                {/* Framework Selector */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-slate-400 font-medium">Framework & Formula</label>
+                  <div className="space-y-1.5">
+                    {STORYBOARD_FRAMEWORKS.map((fw) => (
+                      <button
+                        key={fw.id}
+                        type="button"
+                        onClick={() => setSelectedStoryboardFramework(fw.id)}
+                        className={`w-full p-2.5 rounded-xl border text-left transition-all ${
+                          selectedStoryboardFramework === fw.id
+                            ? 'bg-amber-500/15 border-amber-500/50 text-white shadow-sm'
+                            : 'bg-black/30 border-white/[0.06] text-slate-300 hover:bg-white/[0.04]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-amber-300">{fw.name}</span>
+                          <span className="text-[9px] font-mono text-slate-400">{fw.sceneCount} Scenes • {fw.targetAudience}</span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">{fw.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Topic Input */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-slate-400 font-medium">Video Topic / Concept</label>
+                  <input
+                    type="text"
+                    value={storyboardTopic}
+                    onChange={(e) => setStoryboardTopic(e.target.value)}
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
+                    placeholder="e.g. 3 AI Tools that will replace video editors"
+                  />
+                </div>
+
+                {/* Generate Storyboard Button */}
+                <button
+                  type="button"
+                  onClick={handleGenerateStoryboard}
+                  disabled={isGeneratingStoryboard}
+                  className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-black font-extrabold text-xs shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                >
+                  <Wand2 className="w-4 h-4" />
+                  <span>{isGeneratingStoryboard ? 'Generating Scene Plan...' : 'Generate Multi-Scene Storyboard'}</span>
+                </button>
+
+                {/* Generated Scenes */}
+                {storyboardScenes.length > 0 && (
+                  <div className="space-y-3 pt-2 border-t border-white/[0.08]">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-amber-300 uppercase tracking-wider">
+                        {storyboardScenes.length} Directing Scenes
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleApplyStoryboardToTimeline}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/40 text-[10px] font-extrabold text-emerald-300 transition-all flex items-center gap-1"
+                      >
+                        <Check className="w-3 h-3" /> Apply to Timeline
+                      </button>
+                    </div>
+
+                    <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                      {storyboardScenes.map((scene) => (
+                        <div
+                          key={scene.sceneNumber}
+                          className="p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.07] space-y-1.5"
+                        >
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-bold text-white flex items-center gap-1">
+                              <span className="w-4 h-4 rounded-full bg-amber-500/20 text-amber-300 flex items-center justify-center text-[9px] font-mono">
+                                {scene.sceneNumber}
+                              </span>
+                              {scene.name}
+                            </span>
+                            <span className="text-[10px] font-mono text-amber-400 bg-black/40 px-1.5 py-0.5 rounded">
+                              {scene.duration.toFixed(1)}s
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-300 italic bg-black/20 p-1.5 rounded border border-white/[0.04]">
+                            &quot;{scene.scriptText}&quot;
+                          </p>
+                          <div className="grid grid-cols-2 gap-1 text-[9px] text-slate-400 font-mono">
+                            <div><span className="text-slate-500">Purpose:</span> {scene.purpose}</div>
+                            <div><span className="text-slate-500">B-Roll:</span> {scene.suggestedBrollTitle}</div>
+                            <div><span className="text-slate-500">SFX:</span> {scene.foleySFX || 'None'}</div>
+                            <div><span className="text-slate-500">Motion:</span> {scene.kenBurnsMotion} {scene.reactionSticker || ''}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'splitscreen' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <Split className="w-3.5 h-3.5 text-pink-400" /> Split-Screen & PIP Studio
+                  </h4>
+                  <span className="text-[10px] bg-pink-500/20 text-pink-300 font-mono px-2 py-0.5 rounded-full font-bold">
+                    Duet / Reaction
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  Composite dual videos for TikTok Duets, Reaction Shorts, Podcast Facecams, or Gaming streams.
+                </p>
+
+                {/* Layout Presets */}
+                <div className="space-y-2">
+                  <label className="text-[10px] text-slate-400 font-medium">Layout Style</label>
+                  <div className="space-y-1.5">
+                    {SPLIT_SCREEN_LAYOUTS.map((layout) => (
+                      <button
+                        key={layout.id}
+                        type="button"
+                        onClick={() => handleSelectSplitLayout(layout.id)}
+                        className={`w-full p-2.5 rounded-xl border text-left transition-all ${
+                          splitScreenLayout === layout.id
+                            ? 'bg-pink-500/20 border-pink-400 text-white shadow-sm'
+                            : 'bg-black/30 border-white/[0.06] text-slate-300 hover:bg-white/[0.04]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-pink-300">{layout.name}</span>
+                          <span className="text-[9px] font-mono text-slate-400 uppercase">{layout.idealAspect}</span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-0.5">{layout.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Secondary Media URL */}
+                <div className="space-y-2 pt-2 border-t border-white/[0.08]">
+                  <label className="text-[10px] text-slate-400 font-medium">Secondary Media Asset (URL / B-Roll)</label>
+                  <input
+                    type="text"
+                    value={secondaryMediaUrl}
+                    onChange={(e) => setSecondaryMediaUrl(e.target.value)}
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-pink-400 font-mono text-[11px]"
+                    placeholder="https://... image or video URL"
+                  />
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSecondaryMediaUrl('https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=600&q=80');
+                        toast.success('Loaded portrait creator facecam');
+                      }}
+                      className="py-1.5 px-2 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-[10px] text-slate-300 border border-white/[0.06]"
+                    >
+                      Preset: Facecam
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSecondaryMediaUrl('https://images.unsplash.com/photo-1511512578047-dfb367046420?auto=format&fit=crop&w=600&q=80');
+                        toast.success('Loaded gaming background');
+                      }}
+                      className="py-1.5 px-2 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-[10px] text-slate-300 border border-white/[0.06]"
+                    >
+                      Preset: Gameplay
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'shake' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <Move className="w-3.5 h-3.5 text-cyan-400" /> Motion Blur & Camera Shake
+                  </h4>
+                  <span className="text-[10px] bg-cyan-500/20 text-cyan-300 font-mono px-2 py-0.5 rounded-full font-bold">
+                    Physics Engine
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  High-frequency screen shake vectors simulate explosive physical camera impacts synced to beats, punchlines, and SFX hits.
+                </p>
+
+                {/* Shake Presets */}
+                <div className="space-y-2">
+                  {SHAKE_PRESETS.map((preset) => (
+                    <div
+                      key={preset.id}
+                      className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.07] space-y-2 hover:border-cyan-500/40 transition-all"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-white">{preset.name}</span>
+                        <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/60 border border-cyan-800/40 px-1.5 py-0.5 rounded">
+                          {preset.defaultDuration}s • ±{preset.maxOffsetPx}px
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-tight">{preset.description}</p>
+                      <button
+                        type="button"
+                        onClick={() => handleTriggerCameraShake(preset.id)}
+                        className="w-full py-1.5 px-3 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 font-semibold text-xs border border-cyan-500/40 transition-all flex items-center justify-center gap-1.5"
+                      >
+                        <Zap className="w-3.5 h-3.5 text-cyan-400" /> Trigger Shake at {currentTime.toFixed(1)}s
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -3400,7 +3799,7 @@ export default function ManualStudioPage() {
                   : aspectRatio === '1:1'
                   ? 'h-[440px] aspect-square'
                   : 'w-full max-w-3xl aspect-video'
-              }`}
+              } ${activeCameraShake ? 'animate-pulse scale-[1.02] rotate-1' : ''}`}
             >
               {(() => {
                 const mediaSrc = project?.originalVideoUrl || 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
@@ -3470,6 +3869,48 @@ export default function ManualStudioPage() {
                             e.currentTarget.src = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
                           }}
                         />
+                      )}
+
+                      {/* Split-Screen / PIP Live Studio Overlay Preview */}
+                      {splitScreenLayout !== 'none' && secondaryMediaUrl && (
+                        <>
+                          {splitScreenLayout === 'pip-circle' && (
+                            <div className="absolute top-4 right-4 z-20 w-32 h-32 rounded-full overflow-hidden shadow-2xl border-2 border-pink-400 bg-black pointer-events-none ring-4 ring-pink-500/30">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={secondaryMediaUrl} alt="PIP Facecam" className="w-full h-full object-cover" />
+                              <span className="absolute bottom-1 inset-x-0 text-center text-[8px] font-extrabold bg-black/70 text-pink-300 py-0.5">
+                                FACECAM
+                              </span>
+                            </div>
+                          )}
+                          {splitScreenLayout === 'pip-rect' && (
+                            <div className="absolute bottom-4 right-4 z-20 w-44 aspect-video rounded-xl overflow-hidden shadow-2xl border-2 border-pink-400 bg-black pointer-events-none ring-4 ring-pink-500/30">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={secondaryMediaUrl} alt="PIP Rect" className="w-full h-full object-cover" />
+                              <span className="absolute bottom-1 left-1 text-[8px] font-extrabold bg-pink-600 text-white px-1.5 py-0.5 rounded shadow">
+                                PIP REACTION
+                              </span>
+                            </div>
+                          )}
+                          {splitScreenLayout === 'top-bottom' && (
+                            <div className="absolute bottom-0 inset-x-0 h-1/2 z-20 overflow-hidden shadow-2xl border-t-2 border-pink-500/80 bg-black pointer-events-none">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={secondaryMediaUrl} alt="Bottom Split" className="w-full h-full object-cover" />
+                              <span className="absolute top-2 left-2 text-[8px] font-extrabold bg-pink-600 text-white px-1.5 py-0.5 rounded shadow">
+                                SPLIT DUAL VIEW
+                              </span>
+                            </div>
+                          )}
+                          {splitScreenLayout === 'side-by-side' && (
+                            <div className="absolute top-0 right-0 bottom-0 w-1/2 z-20 overflow-hidden shadow-2xl border-l-2 border-pink-500/80 bg-black pointer-events-none">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={secondaryMediaUrl} alt="Right Split" className="w-full h-full object-cover" />
+                              <span className="absolute top-2 right-2 text-[8px] font-extrabold bg-pink-600 text-white px-1.5 py-0.5 rounded shadow">
+                                SIDE-BY-SIDE DUET
+                              </span>
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   </>
@@ -3974,6 +4415,15 @@ export default function ManualStudioPage() {
         title={project?.title || 'Viral Video'}
         transcript={subtitleText || project?.description || ''}
         duration={duration}
+      />
+
+      {/* Zapier, Make.com & Discord Webhooks Hub Modal */}
+      <WebhookHubModal
+        isOpen={showWebhookModal}
+        onClose={() => setShowWebhookModal(false)}
+        projectTitle={project?.title || 'Viral Video'}
+        projectId={projectId || 'p-1'}
+        duration={duration || 30}
       />
     </div>
   );

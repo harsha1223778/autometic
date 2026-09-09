@@ -10,10 +10,20 @@ import { ActiveCallout, renderCalloutOnCanvas } from './callouts';
 import { applyLUTOverlayTint, ColorAdjustments } from './colorGrading';
 import { ActiveSticker, renderStickerOnCanvas } from './stickerEngine';
 import { calculateKenBurnsTransform } from './kenBurns';
+import { renderSplitScreenComposite } from './splitScreen';
+import { calculateCameraShakeOffset, applyCameraShakeToCanvas } from './motionBlur';
 
 export interface RenderOptions {
   videoElement: HTMLVideoElement | null;
   imageSrc?: string | null;
+  secondaryMediaSrc?: string | null;
+  splitScreenLayout?: 'none' | 'top-bottom' | 'side-by-side' | 'pip-circle' | 'pip-rect';
+  cameraShake?: {
+    type: 'quick-jolt' | 'bass-drop-impact' | 'earthquake-rumble' | 'handheld-micro';
+    startTime: number;
+    duration: number;
+    intensity?: number;
+  };
   aspectRatio: '16:9' | '9:16' | '1:1';
   reframeMode?: 'blurred-letterbox' | 'crop-center' | 'black-bars';
   filter?: string;
@@ -126,6 +136,21 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
     });
   }
 
+  // Pre-load secondary media if split-screen is configured
+  let loadedSecondaryImage: HTMLImageElement | null = null;
+  if (options.secondaryMediaSrc) {
+    loadedSecondaryImage = new Image();
+    loadedSecondaryImage.crossOrigin = 'anonymous';
+    loadedSecondaryImage.src = options.secondaryMediaSrc;
+    await new Promise((res) => {
+      if (loadedSecondaryImage) {
+        loadedSecondaryImage.onload = res;
+        loadedSecondaryImage.onerror = res;
+      }
+      setTimeout(res, 2000);
+    });
+  }
+
   // Set up Audio Context and Destination
   let audioContext: AudioContext | null = null;
   let audioDestination: MediaStreamAudioDestinationNode | null = null;
@@ -223,13 +248,28 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
 
       const currentTime = currentFrame / fps;
       const progress = Math.round((currentFrame / totalFrames) * 100);
-      onProgress?.(progress, `Compositing frame ${currentFrame}/${totalFrames}`);
+      // 1. Save canvas state for camera shake
+      ctx.save();
+      if (options.cameraShake) {
+        const shakeProgress = (currentTime - options.cameraShake.startTime) / (options.cameraShake.duration || 0.5);
+        if (shakeProgress >= 0 && shakeProgress <= 1) {
+          const shake = calculateCameraShakeOffset(
+            options.cameraShake.type,
+            shakeProgress,
+            options.cameraShake.intensity || 1.0
+          );
+          applyCameraShakeToCanvas(ctx, shake, width, height);
+        }
+      }
 
-      // 1. Draw Background / Video Frame
+      // 1a. Draw Background / Video Frame
       ctx.fillStyle = '#000000';
       ctx.fillRect(0, 0, width, height);
 
-      if (loadedBaseImage && loadedBaseImage.complete) {
+      const baseMedia = loadedBaseImage || videoElement;
+      if (options.splitScreenLayout && options.splitScreenLayout !== 'none' && loadedSecondaryImage && baseMedia) {
+        renderSplitScreenComposite(ctx, baseMedia, loadedSecondaryImage, options.splitScreenLayout, width, height);
+      } else if (loadedBaseImage && loadedBaseImage.complete) {
         // Ken Burns effect on still images
         const scale = 1.0 + (currentTime / renderDuration) * 0.12;
         const dw = width * scale;
@@ -420,6 +460,9 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
       if (options.colorLUT) {
         applyLUTOverlayTint(ctx, width, height, options.colorLUT);
       }
+
+      // Restore camera shake transform
+      ctx.restore();
 
       currentFrame++;
       // Draw next frame smoothly
