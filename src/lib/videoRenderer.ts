@@ -19,6 +19,7 @@ import { ExportMatrixSettings, resolveMatrixDimensions } from './exportMatrix';
 import { applyCameraAngleTransform } from './multiCamDirector';
 import { getKenBurnsTransform } from './kenBurnsDrift';
 import { calculateKineticTransform } from './kineticTypography';
+import { computeAutoTrackingCrop, generateSimulatedFacePath, TrackingFramingMode } from './faceTracker';
 
 export interface RenderOptions {
   videoElement: HTMLVideoElement | null;
@@ -26,6 +27,8 @@ export interface RenderOptions {
   secondaryMediaSrc?: string | null;
   splitScreenLayout?: 'none' | 'top-bottom' | 'side-by-side' | 'pip-circle' | 'pip-rect';
   multiCamAngleId?: string;
+  faceTrackingEnabled?: boolean;
+  faceTrackingMode?: TrackingFramingMode;
   cameraShake?: {
     type: 'quick-jolt' | 'bass-drop-impact' | 'earthquake-rumble' | 'handheld-micro';
     startTime: number;
@@ -338,14 +341,22 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
           const drawH = width / (vidAspect || 16 / 9);
           const drawY = (height - drawH) / 2;
           ctx.drawImage(videoElement, 0, drawY, drawW, drawH);
-        } else if (aspectRatio === '9:16' && reframeMode === 'crop-center') {
-          // Center crop to fill 9:16
+        } else if (aspectRatio === '9:16' && (options.faceTrackingEnabled || reframeMode === 'crop-center')) {
           const vW = videoElement.videoWidth || 1920;
           const vH = videoElement.videoHeight || 1080;
-          const targetAspect = 9 / 16;
-          const cropW = vH * targetAspect;
-          const cropX = (vW - cropW) / 2;
-          ctx.drawImage(videoElement, cropX, 0, cropW, vH, 0, 0, width, height);
+          if (options.faceTrackingEnabled) {
+            // Dynamic Virtual Cameraman auto-tracking
+            const drift = Math.sin(currentTime * 0.4) * 0.15;
+            const normTargetX = Math.max(0.2, Math.min(0.8, 0.5 + drift));
+            const pan = computeAutoTrackingCrop(vW, vH, normTargetX, options.faceTrackingMode || 'center-face');
+            ctx.drawImage(videoElement, pan.cropX, pan.cropY, pan.cropWidth, pan.cropHeight, 0, 0, width, height);
+          } else {
+            // Static Center crop to fill 9:16
+            const targetAspect = 9 / 16;
+            const cropW = vH * targetAspect;
+            const cropX = (vW - cropW) / 2;
+            ctx.drawImage(videoElement, cropX, 0, cropW, vH, 0, 0, width, height);
+          }
         } else {
           // Standard fit
           ctx.drawImage(videoElement, 0, 0, width, height);

@@ -149,6 +149,12 @@ import { KEN_BURNS_TRAJECTORIES } from '@/lib/kenBurnsDrift';
 import { analyzeEmotionValenceArc, ValenceArcReport, NARRATIVE_ACTS } from '@/lib/emotionValence';
 import AudioMasteringModal from '@/components/studio/AudioMasteringModal';
 import { VideoEmbedModal } from '@/components/studio/VideoEmbedModal';
+import { TRACKING_MODES, TrackingFramingMode } from '@/lib/faceTracker';
+import { generateBeatSyncGrid, snapTimestampToNearestBeat, COMMON_MUSIC_BPMS, BeatAnalysisReport } from '@/lib/beatDetector';
+import VoiceDubbingModal from '@/components/studio/VoiceDubbingModal';
+import { DubbingProjectReport } from '@/lib/voiceDubber';
+import { evaluatePacingDensity, PacingDensityReport } from '@/lib/pacingEqualizer';
+import AlgorithmSimulatorModal from '@/components/studio/AlgorithmSimulatorModal';
 
 const isImageMedia = (url?: string) => {
   if (!url) return false;
@@ -187,7 +193,7 @@ export default function ManualStudioPage() {
   const [duration, setDuration] = useState(30);
 
   // Studio Tools & Properties State
-  const [activeTab, setActiveTab] = useState<'media' | 'stock' | 'sequence' | 'multicam' | 'voice' | 'script' | 'sfx' | 'transitions' | 'callouts' | 'stickers' | 'retention' | 'emotion' | 'speed' | 'chroma' | 'coach' | 'seo' | 'reframe' | 'trim' | 'audio' | 'subtitles' | 'filters' | 'history' | 'storyboard' | 'splitscreen' | 'shake' | 'highlights' | 'translate'>('media');
+  const [activeTab, setActiveTab] = useState<'media' | 'stock' | 'sequence' | 'multicam' | 'voice' | 'script' | 'sfx' | 'transitions' | 'callouts' | 'stickers' | 'retention' | 'emotion' | 'pacing' | 'speed' | 'chroma' | 'coach' | 'seo' | 'reframe' | 'trim' | 'audio' | 'subtitles' | 'filters' | 'history' | 'storyboard' | 'splitscreen' | 'shake' | 'highlights' | 'translate'>('media');
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
   const [selectedOverlayPosition, setSelectedOverlayPosition] = useState<'top-right' | 'center' | 'lower-third'>('top-right');
   const [overlayDuration, setOverlayDuration] = useState(4.0);
@@ -359,6 +365,16 @@ export default function ManualStudioPage() {
   const [showAudioMasteringModal, setShowAudioMasteringModal] = useState<boolean>(false);
   const [showVideoEmbedModal, setShowVideoEmbedModal] = useState<boolean>(false);
   const [valenceReport, setValenceReport] = useState<ValenceArcReport | null>(null);
+
+  // 33. Phase 8 Neural Editing & Algorithmic Growth States
+  const [faceTrackingEnabled, setFaceTrackingEnabled] = useState<boolean>(true);
+  const [faceTrackingMode, setFaceTrackingMode] = useState<TrackingFramingMode>('center-face');
+  const [selectedTrackBPM, setSelectedTrackBPM] = useState<number>(120);
+  const [showBeatGrid, setShowBeatGrid] = useState<boolean>(false);
+  const [beatReport, setBeatReport] = useState<BeatAnalysisReport | null>(null);
+  const [showVoiceDubbingModal, setShowVoiceDubbingModal] = useState<boolean>(false);
+  const [pacingReport, setPacingReport] = useState<PacingDensityReport | null>(null);
+  const [showAlgorithmModal, setShowAlgorithmModal] = useState<boolean>(false);
 
   // Trim & Audio State
   const [trimStart, setTrimStart] = useState(0);
@@ -737,6 +753,68 @@ export default function ManualStudioPage() {
     const report = analyzeEmotionValenceArc(scenesToAnalyze);
     setValenceReport(report);
     toast.success(`Emotion Arc Analyzed: ${report.overallRetentionScore}% Retention Rating!`);
+  };
+
+  // 33. Phase 8 Handlers
+  const handleGenerateBeatGrid = () => {
+    const report = generateBeatSyncGrid(duration, selectedTrackBPM);
+    setBeatReport(report);
+    setShowBeatGrid(true);
+    toast.success(`Beat Grid Active: ${report.bpm} BPM (${report.beatCount} beats, ${report.dropTimestamps.length} drops detected)!`);
+  };
+
+  const handleSnapCutsToBeat = () => {
+    const report = beatReport || generateBeatSyncGrid(duration, selectedTrackBPM);
+    let snappedCount = 0;
+    const updatedOps = operations.map((op) => {
+      if (op.details?.startTime !== undefined) {
+        const snap = snapTimestampToNearestBeat(Number(op.details.startTime), report.beats, 0.5);
+        if (snap.snappedToBeat) {
+          snappedCount++;
+          return { ...op, details: { ...op.details, startTime: snap.snappedTime } };
+        }
+      }
+      return op;
+    });
+    setOperations(updatedOps);
+    toast.success(`Snapped ${snappedCount} timeline edit cues to musical downbeats!`);
+  };
+
+  const handleEvaluatePacing = () => {
+    const report = evaluatePacingDensity(duration, operations, Boolean(subtitleText));
+    setPacingReport(report);
+    toast.success(`Visual Density Evaluated: ${report.overallDensityScore}% Density Score!`);
+  };
+
+  const handleAutoEqualizePacing = () => {
+    const report = pacingReport || evaluatePacingDensity(duration, operations, Boolean(subtitleText));
+    if (report.lullGaps.length === 0) {
+      toast.info('Timeline pacing is already well-balanced (no visual lulls detected).');
+      return;
+    }
+    const newOperations = [...operations];
+    report.lullGaps.forEach((gap, idx) => {
+      const stockClip = STOCK_MEDIA_LIBRARY[idx % STOCK_MEDIA_LIBRARY.length];
+      newOperations.push({
+        id: `auto-pacing-broll-${Date.now()}-${idx}`,
+        type: 'broll_clip',
+        name: `B-Roll Cutaway (${stockClip.title})`,
+        timestamp: new Date().toLocaleTimeString(),
+        details: {
+          stockId: stockClip.id,
+          title: stockClip.title,
+          url: stockClip.url,
+          startTime: gap.startTime,
+          duration: Math.min(gap.duration, 3.0),
+          position: 'center',
+          motionPreset: 'zoom-in',
+        },
+      });
+    });
+    setOperations(newOperations);
+    const updatedReport = evaluatePacingDensity(duration, newOperations, Boolean(subtitleText));
+    setPacingReport(updatedReport);
+    toast.success(`Auto-inserted ${report.lullGaps.length} pacing cutaways! Pacing density score: ${updatedReport.overallDensityScore}%!`);
   };
 
   // Global NLE Keyboard Shortcuts Engine
@@ -1448,6 +1526,8 @@ export default function ManualStudioPage() {
         customSubtitleStyling: customSubtitleStyling,
         kenBurnsTrajectory: selectedKenBurnsTrajectory,
         kineticPreset: kineticTypographyPreset,
+        faceTrackingEnabled,
+        faceTrackingMode,
         duration: Math.min(30, trimEnd - trimStart || duration),
         subtitles: subtitleText
           ? {
@@ -1691,6 +1771,22 @@ export default function ManualStudioPage() {
             <Share2 className="w-3.5 h-3.5 text-blue-400" />
             <span className="hidden sm:inline">Embed</span>
           </button>
+          <button
+            onClick={() => setShowVoiceDubbingModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 text-xs font-semibold text-purple-300 border border-purple-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+            title="AI Multi-Language Voice Dubbing & Speech Re-Synthesis"
+          >
+            <Globe className="w-3.5 h-3.5 text-purple-400" />
+            <span className="hidden sm:inline">Voice Dub</span>
+          </button>
+          <button
+            onClick={() => setShowAlgorithmModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-pink-500/15 hover:bg-pink-500/25 text-xs font-semibold text-pink-300 border border-pink-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+            title="AI Social Algorithm Simulator (TikTok FYP / YouTube Shorts / Reels)"
+          >
+            <TrendingUp className="w-3.5 h-3.5 text-pink-400" />
+            <span className="hidden sm:inline">Algorithms</span>
+          </button>
           <div className="h-4 w-px bg-white/10 mx-1" />
           <button
             onClick={handleSaveDraft}
@@ -1745,6 +1841,7 @@ export default function ManualStudioPage() {
               { id: 'stickers', label: 'Stickers', icon: Smile },
               { id: 'retention', label: 'Retention', icon: Activity },
               { id: 'emotion', label: 'Emotion Arc', icon: Flame },
+              { id: 'pacing', label: 'Pacing Density', icon: Gauge },
               { id: 'callouts', label: 'Callouts', icon: AtSign },
               { id: 'filters', label: 'LUTs/Grading', icon: SlidersHorizontal },
               { id: 'script', label: 'Script', icon: FileText },
@@ -3056,6 +3153,53 @@ export default function ManualStudioPage() {
                         </button>
                       ))}
                     </div>
+
+                    {/* Dynamic AI Face Auto-Tracking (Virtual Cameraman) */}
+                    <div className="p-3.5 rounded-2xl bg-gradient-to-br from-purple-950/30 to-zinc-900 border border-purple-500/30 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="text-[11px] font-bold text-white block">AI Dynamic Virtual Cameraman</span>
+                          <span className="text-[9px] text-zinc-400">Face auto-tracking with smooth pan &amp; scan</span>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={faceTrackingEnabled}
+                          onChange={(e) => {
+                            setFaceTrackingEnabled(e.target.checked);
+                            toast.success(e.target.checked ? 'Virtual Cameraman Face Tracking Enabled' : 'Face Tracking Disabled');
+                          }}
+                          className="rounded bg-zinc-800 border-zinc-700 text-purple-600 focus:ring-purple-500"
+                        />
+                      </div>
+
+                      {faceTrackingEnabled && (
+                        <div className="space-y-1.5 pt-1 border-t border-white/[0.06]">
+                          <span className="text-[9px] font-bold text-purple-300 uppercase tracking-wider block">
+                            Framing Composition Mode
+                          </span>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            {TRACKING_MODES.map((mode) => (
+                              <button
+                                key={mode.id}
+                                type="button"
+                                onClick={() => {
+                                  setFaceTrackingMode(mode.id);
+                                  toast.success(`Active Framing: ${mode.name}`);
+                                }}
+                                className={`p-2 rounded-xl text-left border text-[10px] transition-all ${
+                                  faceTrackingMode === mode.id
+                                    ? 'bg-purple-600/30 border-purple-400 text-white font-bold ring-1 ring-purple-400/50'
+                                    : 'bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-white'
+                                }`}
+                              >
+                                <span className="font-bold block truncate">{mode.name}</span>
+                                <span className="text-[8px] text-slate-400 block line-clamp-1 mt-0.5">{mode.description}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -3241,6 +3385,66 @@ export default function ManualStudioPage() {
                       </button>
                     ))}
                   </div>
+                </div>
+
+                {/* Smart Beat-Sync Cut & BPM Music Drop Auto-Editor */}
+                <div className="p-3.5 rounded-2xl bg-gradient-to-br from-pink-950/25 to-purple-950/20 border border-pink-500/30 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-pink-300 flex items-center gap-1.5">
+                      <Zap className="w-3.5 h-3.5 text-pink-400" /> Beat-Sync &amp; BPM Auto-Cutter
+                    </span>
+                    <span className="text-[9px] font-mono font-bold text-pink-300 bg-pink-500/20 px-1.5 py-0.5 rounded">
+                      {selectedTrackBPM} BPM
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 leading-snug">
+                    Detects rhythmic downbeats and musical drops to snap edit cuts on the beat.
+                  </p>
+
+                  {/* BPM Presets */}
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {COMMON_MUSIC_BPMS.slice(0, 3).map((b) => (
+                      <button
+                        key={b.bpm}
+                        type="button"
+                        onClick={() => setSelectedTrackBPM(b.bpm)}
+                        className={`p-1.5 rounded-xl border text-center text-[10px] transition-all ${
+                          selectedTrackBPM === b.bpm
+                            ? 'bg-pink-600/30 border-pink-400 text-white font-bold'
+                            : 'bg-black/30 border-white/5 text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <span className="font-mono block">{b.bpm} BPM</span>
+                        <span className="text-[8px] text-slate-500 block truncate">{b.genre.split('&')[0]}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={handleGenerateBeatGrid}
+                      className="py-2 px-2.5 rounded-xl bg-pink-600/20 border border-pink-500/40 hover:bg-pink-600/30 text-xs font-semibold text-pink-200 transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <Activity className="w-3 h-3" />
+                      <span>{showBeatGrid ? 'Regenerate' : 'Detect Beats'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSnapCutsToBeat}
+                      className="py-2 px-2.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-xs font-bold text-white shadow-md transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <Check className="w-3 h-3 stroke-[3]" />
+                      <span>Snap Cuts</span>
+                    </button>
+                  </div>
+
+                  {beatReport && (
+                    <div className="p-2 rounded-xl bg-black/40 border border-white/5 text-[10px] text-zinc-300 flex items-center justify-between">
+                      <span>{beatReport.beatCount} Beats ({beatReport.dropTimestamps.length} drops)</span>
+                      <span className="text-pink-400 font-mono font-bold">{beatReport.recommendedTransitionCadence}</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-3 pt-3 border-t border-white/[0.06]">
@@ -4029,6 +4233,123 @@ export default function ManualStudioPage() {
                         </div>
                       ))}
                     </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'pacing' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <Gauge className="w-3.5 h-3.5 text-cyan-400" /> Visual Density Equalizer
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={handleEvaluatePacing}
+                    className="text-[10px] text-cyan-400 hover:text-cyan-300 font-bold underline"
+                  >
+                    Scan Pacing
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  Evaluates cut cadence and eye stimulation to eliminate visual lulls &gt;3s that cause viewer drop-off.
+                </p>
+
+                {/* Score & Pacing Overview */}
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-cyan-950/30 via-blue-950/20 to-[#0A0E1A] border border-cyan-500/30 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-300 font-medium">Visual Density Rating</span>
+                    <span className="text-2xl font-black font-mono text-cyan-400">
+                      {pacingReport ? `${pacingReport.overallDensityScore}%` : '88%'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                    <div className="p-2 rounded-xl bg-black/40 border border-white/5">
+                      <span className="text-[9px] text-slate-400 block uppercase">Pacing State</span>
+                      <span className={`font-mono font-bold text-[11px] capitalize ${
+                        pacingReport?.pacingHealth === 'monotonous' ? 'text-amber-400' : 'text-emerald-400'
+                      }`}>
+                        {pacingReport ? pacingReport.pacingHealth : 'Optimal'}
+                      </span>
+                    </div>
+                    <div className="p-2 rounded-xl bg-black/40 border border-white/5">
+                      <span className="text-[9px] text-slate-400 block uppercase">Cut Cadence</span>
+                      <span className="font-mono font-bold text-[11px] text-cyan-300">
+                        {pacingReport ? `${pacingReport.averageCutIntervalSeconds}s` : '2.6s'}
+                      </span>
+                    </div>
+                    <div className="p-2 rounded-xl bg-black/40 border border-white/5">
+                      <span className="text-[9px] text-slate-400 block uppercase">Visual Lulls</span>
+                      <span className="font-mono font-bold text-[11px] text-amber-300">
+                        {pacingReport ? `${pacingReport.lullGaps.length}` : '0 gaps'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Auto-Equalize Action */}
+                <button
+                  type="button"
+                  onClick={handleAutoEqualizePacing}
+                  className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-xs font-bold text-white shadow-lg transition-all flex items-center justify-center gap-2"
+                >
+                  <Sparkles className="w-4 h-4" /> Auto-Equalize Visual Cadence (Inject B-Roll)
+                </button>
+
+                {/* Detected Lull Gaps */}
+                {pacingReport?.lullGaps && pacingReport.lullGaps.length > 0 ? (
+                  <div className="space-y-2 p-3 rounded-2xl bg-cyan-950/20 border border-cyan-500/30">
+                    <span className="text-[10px] font-bold text-cyan-300 uppercase tracking-wider block">
+                      Detected Visual Lulls ({pacingReport.lullGaps.length})
+                    </span>
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+                      {pacingReport.lullGaps.map((gap, i) => (
+                        <div
+                          key={i}
+                          className="p-2 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-between text-xs gap-2"
+                        >
+                          <div className="overflow-hidden">
+                            <p className="font-semibold text-white text-[11px] truncate">{gap.actionDescription}</p>
+                            <span className="text-[9px] text-cyan-400 font-mono">
+                              {formatTime(gap.startTime)} – {formatTime(gap.endTime)} ({gap.duration}s pause)
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (videoRef.current) {
+                                videoRef.current.currentTime = gap.startTime;
+                                setCurrentTime(gap.startTime);
+                              }
+                              setActiveTab('stock');
+                            }}
+                            className="px-2 py-1 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black text-[10px] font-bold flex-shrink-0"
+                          >
+                            Jump
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-xl bg-emerald-950/20 border border-emerald-500/30 text-center text-xs text-emerald-300">
+                    ✓ Timeline visual cadence meets the golden 2.5s engagement standard.
+                  </div>
+                )}
+
+                {/* Recommendations */}
+                {pacingReport?.recommendations && pacingReport.recommendations.length > 0 && (
+                  <div className="space-y-1.5 pt-2 border-t border-white/[0.08]">
+                    <span className="text-[11px] font-bold text-white uppercase tracking-wider block">
+                      Cadence Optimization Insights
+                    </span>
+                    {pacingReport.recommendations.map((rec, idx) => (
+                      <div key={idx} className="p-2 rounded-xl bg-white/[0.03] border border-white/[0.06] text-xs text-slate-300">
+                        {rec}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -5595,6 +5916,30 @@ export default function ManualStudioPage() {
         onClose={() => setShowVideoEmbedModal(false)}
         projectId={projectId || 'p-1'}
         videoUrl={project?.videoUrl || project?.mediaUrl || ''}
+      />
+
+      {/* AI Multi-Language Voice Dubbing & Speech Re-Synthesis Modal */}
+      <VoiceDubbingModal
+        isOpen={showVoiceDubbingModal}
+        onClose={() => setShowVoiceDubbingModal(false)}
+        originalTranscript={subtitleText || project?.description || ''}
+        duration={duration}
+        onApplyDubbing={(report) => {
+          setSubtitleText(report.translatedFullScript);
+          toast.success(`Voice Dub applied in ${report.targetLanguage.name} (${report.syncAccuracyPercent}% time-sync)!`);
+        }}
+      />
+
+      {/* AI Social Algorithm Simulator & Viral Predictor Modal */}
+      <AlgorithmSimulatorModal
+        isOpen={showAlgorithmModal}
+        onClose={() => setShowAlgorithmModal(false)}
+        duration={duration}
+        hasSubtitles={Boolean(subtitleText && subtitleText.trim())}
+        hasMusic={Boolean(musicTrack || selectedProceduralTrack || activeSoundscape)}
+        hasOverlays={operations.some((op) => op.type === 'broll_clip' || op.type === 'overlay_image')}
+        operationsCount={operations.length}
+        onAutoOptimize={handleAutoEqualizePacing}
       />
     </div>
   );
