@@ -76,6 +76,7 @@ export function generateKaraokePhrases(rawText: string, totalDuration: number = 
 }
 
 import { SubtitleStyling } from '@/lib/subtitleDesigner';
+import { calculateKineticTransform } from '@/lib/kineticTypography';
 
 interface KaraokeSubtitlesProps {
   currentTime: number;
@@ -85,6 +86,7 @@ interface KaraokeSubtitlesProps {
   position?: 'bottom' | 'center' | 'top';
   customPhrases?: TimedPhrase[];
   customStyling?: SubtitleStyling;
+  kineticPreset?: string;
 }
 
 export default function KaraokeSubtitles({
@@ -95,6 +97,7 @@ export default function KaraokeSubtitles({
   position = 'bottom',
   customPhrases,
   customStyling,
+  kineticPreset = 'pop-bounce',
 }: KaraokeSubtitlesProps) {
   const phrases = useMemo(() => {
     if (customPhrases && customPhrases.length > 0) return customPhrases;
@@ -129,6 +132,10 @@ export default function KaraokeSubtitles({
         {activePhrase.words.map((item, idx) => {
           const isCurrentWord = currentTime >= item.start && currentTime <= item.end;
           const isPassedWord = currentTime > item.end;
+          const wordProgress = isCurrentWord
+            ? Math.min(1, Math.max(0, (currentTime - item.start) / Math.max(0.01, item.end - item.start)))
+            : 0;
+          const kinetic = isCurrentWord && kineticPreset ? calculateKineticTransform(kineticPreset, wordProgress) : null;
 
           if (customStyling) {
             const fontSz = customStyling.fontSize || fontSize;
@@ -137,9 +144,9 @@ export default function KaraokeSubtitles({
             return (
               <span
                 key={idx}
-                className={`transition-all duration-100 inline-flex items-center gap-1 ${textCase} ${
+                className={`transition-all duration-75 inline-flex items-center gap-1 ${textCase} ${
                   isCurrentWord
-                    ? `scale-110 px-2.5 py-1 ${roundedClasses} shadow-2xl`
+                    ? `px-2.5 py-1 ${roundedClasses} shadow-2xl`
                     : isPassedWord
                     ? 'opacity-95'
                     : 'opacity-40'
@@ -150,6 +157,14 @@ export default function KaraokeSubtitles({
                   fontWeight: customStyling.fontWeight,
                   color: isCurrentWord ? customStyling.highlightTextColor : customStyling.textColor,
                   backgroundColor: isCurrentWord ? customStyling.highlightBgColor : 'transparent',
+                  transform: kinetic
+                    ? `scale(${kinetic.scale}) translate(${kinetic.translateX}px, ${kinetic.translateY}px) rotate(${kinetic.rotate}rad)`
+                    : isCurrentWord
+                    ? 'scale(1.1)'
+                    : 'none',
+                  filter: kinetic && kinetic.glowBlur > 0
+                    ? `drop-shadow(0 0 ${kinetic.glowBlur}px ${kinetic.glowColor})`
+                    : 'none',
                   WebkitTextStroke: customStyling.strokeWidth > 0 && !isCurrentWord
                     ? `${customStyling.strokeWidth}px ${customStyling.strokeColor}`
                     : 'none',
@@ -170,9 +185,9 @@ export default function KaraokeSubtitles({
             return (
               <span
                 key={idx}
-                className={`font-black uppercase tracking-tight transition-all duration-100 inline-flex items-center gap-1 ${
+                className={`font-black uppercase tracking-tight transition-all duration-75 inline-flex items-center gap-1 ${
                   isCurrentWord
-                    ? 'scale-115 text-black bg-[#FFE600] px-2 py-0.5 rounded-md shadow-2xl ring-2 ring-[#FFE600]/80'
+                    ? 'text-black bg-[#FFE600] px-2 py-0.5 rounded-md shadow-2xl ring-2 ring-[#FFE600]/80'
                     : isPassedWord
                     ? 'text-white/90 drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]'
                     : 'text-white/40'
@@ -180,6 +195,14 @@ export default function KaraokeSubtitles({
                 style={{
                   fontSize: `${fontSize}px`,
                   WebkitTextStroke: isCurrentWord ? 'none' : '1px black',
+                  transform: kinetic
+                    ? `scale(${kinetic.scale}) translate(${kinetic.translateX}px, ${kinetic.translateY}px) rotate(${kinetic.rotate}rad)`
+                    : isCurrentWord
+                    ? 'scale(1.15)'
+                    : 'none',
+                  filter: kinetic && kinetic.glowBlur > 0
+                    ? `drop-shadow(0 0 ${kinetic.glowBlur}px ${kinetic.glowColor})`
+                    : 'none',
                 }}
               >
                 <span>{item.word}</span>
@@ -194,14 +217,21 @@ export default function KaraokeSubtitles({
             return (
               <span
                 key={idx}
-                className={`font-bold transition-all duration-150 px-1 rounded ${
+                className={`font-bold transition-all duration-75 px-1 rounded ${
                   isCurrentWord
-                    ? 'text-cyan-300 scale-110 drop-shadow-[0_0_12px_rgba(34,211,238,0.9)] bg-cyan-950/60 border border-cyan-400/50'
+                    ? 'text-cyan-300 drop-shadow-[0_0_12px_rgba(34,211,238,0.9)] bg-cyan-950/60 border border-cyan-400/50'
                     : isPassedWord
                     ? 'text-white/80'
                     : 'text-white/30'
                 }`}
-                style={{ fontSize: `${fontSize}px` }}
+                style={{
+                  fontSize: `${fontSize}px`,
+                  transform: kinetic
+                    ? `scale(${kinetic.scale}) translate(${kinetic.translateX}px, ${kinetic.translateY}px) rotate(${kinetic.rotate}rad)`
+                    : isCurrentWord
+                    ? 'scale(1.1)'
+                    : 'none',
+                }}
               >
                 {item.word}
               </span>

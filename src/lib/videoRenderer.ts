@@ -17,6 +17,8 @@ import { applyVelocityTransition } from './velocityTransitions';
 import { SubtitleStyling } from './subtitleDesigner';
 import { ExportMatrixSettings, resolveMatrixDimensions } from './exportMatrix';
 import { applyCameraAngleTransform } from './multiCamDirector';
+import { getKenBurnsTransform } from './kenBurnsDrift';
+import { calculateKineticTransform } from './kineticTypography';
 
 export interface RenderOptions {
   videoElement: HTMLVideoElement | null;
@@ -40,6 +42,7 @@ export interface RenderOptions {
   transitionType?: string;
   chromaKey?: ChromaKeyOptions;
   kenBurnsPreset?: string;
+  kenBurnsTrajectory?: string;
   stickers?: ActiveSticker[];
   subtitles?: {
     text: string;
@@ -62,6 +65,7 @@ export interface RenderOptions {
   musicVolume?: number;
   exportMatrix?: ExportMatrixSettings;
   customSubtitleStyling?: SubtitleStyling;
+  kineticPreset?: string;
   velocityTransitionType?: string;
   onProgress?: (progressPct: number, stage: string) => void;
 }
@@ -305,12 +309,14 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
       if (options.splitScreenLayout && options.splitScreenLayout !== 'none' && loadedSecondaryImage && baseMedia) {
         renderSplitScreenComposite(ctx, baseMedia, loadedSecondaryImage, options.splitScreenLayout, width, height);
       } else if (loadedBaseImage && loadedBaseImage.complete) {
-        // Ken Burns effect on still images
-        const scale = 1.0 + (currentTime / renderDuration) * 0.12;
-        const dw = width * scale;
-        const dh = height * scale;
-        const dx = (width - dw) / 2;
-        const dy = (height - dh) / 2;
+        // Multi-Directional Ken Burns Framing & Drift
+        const progress = currentTime / renderDuration;
+        const traj = options.kenBurnsTrajectory || options.kenBurnsPreset || 'diagonal-down-right';
+        const kb = getKenBurnsTransform(traj, progress);
+        const dw = width * kb.scale;
+        const dh = height * kb.scale;
+        const dx = (width - dw) / 2 + (kb.translateX * width) / 100;
+        const dy = (height - dh) / 2 + (kb.translateY * height) / 100;
         ctx.drawImage(loadedBaseImage, dx, dy, dw, dh);
       } else if (videoElement) {
         ctx.save();

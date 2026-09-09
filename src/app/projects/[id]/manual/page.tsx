@@ -144,6 +144,11 @@ import HookTesterModal from '@/components/studio/HookTesterModal';
 import { EditorialPin, loadEditorialPins, saveEditorialPins } from '@/lib/editorialReview';
 import EditorialReviewModal from '@/components/studio/EditorialReviewModal';
 import ChannelSchedulerModal from '@/components/studio/ChannelSchedulerModal';
+import { KINETIC_PRESETS } from '@/lib/kineticTypography';
+import { KEN_BURNS_TRAJECTORIES } from '@/lib/kenBurnsDrift';
+import { analyzeEmotionValenceArc, ValenceArcReport, NARRATIVE_ACTS } from '@/lib/emotionValence';
+import AudioMasteringModal from '@/components/studio/AudioMasteringModal';
+import { VideoEmbedModal } from '@/components/studio/VideoEmbedModal';
 
 const isImageMedia = (url?: string) => {
   if (!url) return false;
@@ -182,7 +187,7 @@ export default function ManualStudioPage() {
   const [duration, setDuration] = useState(30);
 
   // Studio Tools & Properties State
-  const [activeTab, setActiveTab] = useState<'media' | 'stock' | 'sequence' | 'multicam' | 'voice' | 'script' | 'sfx' | 'transitions' | 'callouts' | 'stickers' | 'retention' | 'speed' | 'chroma' | 'coach' | 'seo' | 'reframe' | 'trim' | 'audio' | 'subtitles' | 'filters' | 'history' | 'storyboard' | 'splitscreen' | 'shake' | 'highlights' | 'translate'>('media');
+  const [activeTab, setActiveTab] = useState<'media' | 'stock' | 'sequence' | 'multicam' | 'voice' | 'script' | 'sfx' | 'transitions' | 'callouts' | 'stickers' | 'retention' | 'emotion' | 'speed' | 'chroma' | 'coach' | 'seo' | 'reframe' | 'trim' | 'audio' | 'subtitles' | 'filters' | 'history' | 'storyboard' | 'splitscreen' | 'shake' | 'highlights' | 'translate'>('media');
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
   const [selectedOverlayPosition, setSelectedOverlayPosition] = useState<'top-right' | 'center' | 'lower-third'>('top-right');
   const [overlayDuration, setOverlayDuration] = useState(4.0);
@@ -348,6 +353,12 @@ export default function ManualStudioPage() {
   const [showEditorialReviewModal, setShowEditorialReviewModal] = useState<boolean>(false);
   const [editorialPins, setEditorialPins] = useState<EditorialPin[]>(() => loadEditorialPins(projectId || 'default'));
   const [showChannelSchedulerModal, setShowChannelSchedulerModal] = useState<boolean>(false);
+  // 32. Phase 7 Enterprise Studio & Viral Engine States
+  const [kineticTypographyPreset, setKineticTypographyPreset] = useState<string>('pop-bounce');
+  const [selectedKenBurnsTrajectory, setSelectedKenBurnsTrajectory] = useState<string>('diagonal-down-right');
+  const [showAudioMasteringModal, setShowAudioMasteringModal] = useState<boolean>(false);
+  const [showVideoEmbedModal, setShowVideoEmbedModal] = useState<boolean>(false);
+  const [valenceReport, setValenceReport] = useState<ValenceArcReport | null>(null);
 
   // Trim & Audio State
   const [trimStart, setTrimStart] = useState(0);
@@ -710,6 +721,22 @@ export default function ManualStudioPage() {
     });
     setRetentionReport(report);
     toast.success(`Audience Retention: ${report.overallRetentionScore}% projected retention score!`);
+  };
+
+  // 32. AI Video Emotion Valence Arc & Tension Curve Simulator
+  const handleRunValenceAnalysis = () => {
+    const scenesToAnalyze = storyboardScenes.length > 0
+      ? storyboardScenes
+      : [
+          { dialogue: subtitleText || 'Transform your content into viral high engagement videos', duration: 4 },
+          { dialogue: 'Most creators struggle with tedious editing and low retention drop-offs.', duration: 5 },
+          { dialogue: 'EditFlow AI introduces autonomous neural editing and kinetic pacing.', duration: 6 },
+          { dialogue: 'Watch your engagement surge with broadcast-quality mastering.', duration: 5 },
+          { dialogue: 'Try EditFlow AI today and dominate short-form algorithms!', duration: 4 },
+        ];
+    const report = analyzeEmotionValenceArc(scenesToAnalyze);
+    setValenceReport(report);
+    toast.success(`Emotion Arc Analyzed: ${report.overallRetentionScore}% Retention Rating!`);
   };
 
   // Global NLE Keyboard Shortcuts Engine
@@ -1419,6 +1446,8 @@ export default function ManualStudioPage() {
         chromaKey: chromaKeyOptions.enabled ? chromaKeyOptions : undefined,
         exportMatrix: activeExportMatrix,
         customSubtitleStyling: customSubtitleStyling,
+        kenBurnsTrajectory: selectedKenBurnsTrajectory,
+        kineticPreset: kineticTypographyPreset,
         duration: Math.min(30, trimEnd - trimStart || duration),
         subtitles: subtitleText
           ? {
@@ -1646,6 +1675,22 @@ export default function ManualStudioPage() {
             <Calendar className="w-3.5 h-3.5 text-emerald-400" />
             <span className="hidden sm:inline">Schedule</span>
           </button>
+          <button
+            onClick={() => setShowAudioMasteringModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-xs font-semibold text-amber-300 border border-amber-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+            title="Broadcast Audio Mastering & LUFS Loudness Normalizer"
+          >
+            <Volume2 className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">Mastering</span>
+          </button>
+          <button
+            onClick={() => setShowVideoEmbedModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-blue-500/15 hover:bg-blue-500/25 text-xs font-semibold text-blue-300 border border-blue-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+            title="Universal Video Embed & Interactive Player Studio"
+          >
+            <Share2 className="w-3.5 h-3.5 text-blue-400" />
+            <span className="hidden sm:inline">Embed</span>
+          </button>
           <div className="h-4 w-px bg-white/10 mx-1" />
           <button
             onClick={handleSaveDraft}
@@ -1699,6 +1744,7 @@ export default function ManualStudioPage() {
               { id: 'stock', label: 'B-Roll', icon: Flame },
               { id: 'stickers', label: 'Stickers', icon: Smile },
               { id: 'retention', label: 'Retention', icon: Activity },
+              { id: 'emotion', label: 'Emotion Arc', icon: Flame },
               { id: 'callouts', label: 'Callouts', icon: AtSign },
               { id: 'filters', label: 'LUTs/Grading', icon: SlidersHorizontal },
               { id: 'script', label: 'Script', icon: FileText },
@@ -2068,6 +2114,39 @@ export default function ManualStudioPage() {
                     </div>
                   </div>
                 )}
+
+                {/* Multi-Directional Ken Burns Framing & Drift Trajectories */}
+                <div className="space-y-2 p-3 rounded-2xl bg-cyan-950/20 border border-cyan-500/30">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-cyan-300 uppercase tracking-wider block">
+                      Ken Burns Camera Framing ({KEN_BURNS_TRAJECTORIES.length})
+                    </span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-mono font-bold">
+                      8-Axis Drift
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5 max-h-44 overflow-y-auto pr-1">
+                    {KEN_BURNS_TRAJECTORIES.map((traj) => (
+                      <button
+                        key={traj.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedKenBurnsTrajectory(traj.id);
+                          toast.success(`Active Camera Drift: ${traj.name}`);
+                        }}
+                        className={`p-2 rounded-xl border text-left transition-all ${
+                          selectedKenBurnsTrajectory === traj.id
+                            ? 'bg-cyan-500/25 border-cyan-400 text-white font-bold ring-1 ring-cyan-400/60 shadow-md'
+                            : 'bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <span className="text-[11px] font-bold text-white block truncate">{traj.name}</span>
+                        <span className="text-[8px] text-cyan-300 uppercase font-mono block mt-0.5">{traj.category}</span>
+                        <span className="text-[8px] text-slate-400 block line-clamp-1 mt-0.5">{traj.description}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
                 {/* Search & Category Filter */}
                 <div className="space-y-2">
@@ -3404,6 +3483,43 @@ export default function ManualStudioPage() {
                   </div>
                 </div>
 
+                {/* Dynamic Kinetic Typography Micro-Physics */}
+                <div className="space-y-2 p-3 rounded-2xl bg-yellow-950/20 border border-yellow-500/30">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] text-yellow-300 font-bold flex items-center gap-1.5">
+                      <Flame className="w-3.5 h-3.5 text-yellow-400" />
+                      Kinetic Micro-Physics Engine ({KINETIC_PRESETS.length})
+                    </label>
+                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-300 font-bold">
+                      Per-Word Physics
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {KINETIC_PRESETS.map((k) => (
+                      <button
+                        key={k.id}
+                        type="button"
+                        onClick={() => {
+                          setKineticTypographyPreset(k.id);
+                          toast.success(`Active Kinetic Animation: ${k.name}`);
+                        }}
+                        className={`p-2 rounded-xl border text-left transition-all relative ${
+                          kineticTypographyPreset === k.id
+                            ? 'bg-yellow-500/20 border-yellow-400 text-white font-bold ring-1 ring-yellow-400/60 shadow-md'
+                            : 'bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span>{k.icon}</span>
+                          <span className="text-[8px] px-1 py-0.5 bg-white/10 rounded text-yellow-300 uppercase font-mono">{k.badge}</span>
+                        </div>
+                        <span className="text-[11px] font-bold text-white block truncate">{k.name}</span>
+                        <span className="text-[8px] text-slate-400 block line-clamp-1 mt-0.5">{k.description}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Granular Typography Controls */}
                 <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06] space-y-3">
                   <span className="text-[10px] font-bold text-slate-300 uppercase tracking-wider block">
@@ -3763,6 +3879,153 @@ export default function ManualStudioPage() {
                           >
                             Jump to Playhead & Fix →
                           </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'emotion' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <Flame className="w-3.5 h-3.5 text-amber-400" /> Emotion & Tension Arc
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={handleRunValenceAnalysis}
+                    className="text-[10px] text-amber-400 hover:text-amber-300 font-bold underline"
+                  >
+                    Simulate Arc
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  Audience emotional polarity (-1.0 friction to +1.0 epiphany) and narrative tension curve.
+                </p>
+
+                {/* Score & Pacing Overview */}
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-950/30 via-purple-950/20 to-[#0A0E1A] border border-amber-500/30 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-300 font-medium">Predicted Retention Rating</span>
+                    <span className="text-2xl font-black font-mono text-amber-400">
+                      {valenceReport ? `${valenceReport.overallRetentionScore}%` : '88%'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                    <div className="p-2 rounded-xl bg-black/40 border border-white/5">
+                      <span className="text-[9px] text-slate-400 block uppercase">Hook Risk</span>
+                      <span className={`font-mono font-bold text-[11px] capitalize ${
+                        valenceReport?.hookDropoffRisk === 'high' ? 'text-rose-400' : 'text-emerald-400'
+                      }`}>
+                        {valenceReport ? valenceReport.hookDropoffRisk : 'Low'}
+                      </span>
+                    </div>
+                    <div className="p-2 rounded-xl bg-black/40 border border-white/5">
+                      <span className="text-[9px] text-slate-400 block uppercase">Pacing Cadence</span>
+                      <span className="font-mono font-bold text-[11px] text-cyan-300 capitalize">
+                        {valenceReport ? valenceReport.pacingHealth : 'Optimal'}
+                      </span>
+                    </div>
+                    <div className="p-2 rounded-xl bg-black/40 border border-white/5">
+                      <span className="text-[9px] text-slate-400 block uppercase">Peak Act</span>
+                      <span className="font-mono font-bold text-[11px] text-purple-300 truncate block">
+                        {valenceReport ? valenceReport.peakTensionAct : 'The Hook'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Narrative 5-Act Progression Badges */}
+                <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.06] space-y-2">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Narrative Emotional Acts
+                  </span>
+                  <div className="grid grid-cols-5 gap-1 text-center">
+                    {NARRATIVE_ACTS.map((act, i) => (
+                      <div key={i} className="p-1.5 rounded-lg bg-black/40 border border-white/5 space-y-0.5">
+                        <div className="w-2 h-2 rounded-full mx-auto" style={{ backgroundColor: act.color }} />
+                        <span className="text-[9px] font-bold text-white block truncate">{act.act}</span>
+                        <span className="text-[8px] text-slate-400 block">{Math.round(act.recommendedTension * 100)}% T</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* SVG Tension & Polarity Curve */}
+                <div className="p-3 rounded-xl bg-black/50 border border-white/[0.08] space-y-2">
+                  <div className="flex items-center justify-between text-[10px]">
+                    <span className="font-bold text-slate-300 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-amber-400" /> Tension Curve
+                    </span>
+                    <span className="font-bold text-slate-300 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-purple-400" /> Valence (Polarity)
+                    </span>
+                  </div>
+                  <div className="h-28 w-full relative flex items-end pt-2">
+                    <svg className="w-full h-full overflow-visible" viewBox="0 0 300 100" preserveAspectRatio="none">
+                      <line x1="0" y1="50" x2="300" y2="50" stroke="#334155" strokeDasharray="3 3" strokeWidth="1" />
+                      {/* Tension Path */}
+                      <path
+                        d={
+                          valenceReport?.dataPoints && valenceReport.dataPoints.length > 1
+                            ? valenceReport.dataPoints
+                                .map((dp, i) => {
+                                  const x = (i / (valenceReport.dataPoints.length - 1)) * 300;
+                                  const y = 90 - dp.tension * 80;
+                                  return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
+                                })
+                                .join(' ')
+                            : 'M 0 20 L 75 45 L 150 65 L 225 75 L 300 15'
+                        }
+                        fill="none"
+                        stroke="#f59e0b"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                      />
+                      {/* Valence Path */}
+                      <path
+                        d={
+                          valenceReport?.dataPoints && valenceReport.dataPoints.length > 1
+                            ? valenceReport.dataPoints
+                                .map((dp, i) => {
+                                  const x = (i / (valenceReport.dataPoints.length - 1)) * 300;
+                                  const y = 50 - dp.valence * 35;
+                                  return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
+                                })
+                                .join(' ')
+                            : 'M 0 45 L 75 65 L 150 30 L 225 20 L 300 35'
+                        }
+                        fill="none"
+                        stroke="#8b5cf6"
+                        strokeWidth="2"
+                        strokeDasharray="4 2"
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleRunValenceAnalysis}
+                  className="w-full py-2.5 px-4 rounded-xl bg-amber-600 hover:bg-amber-500 text-xs font-bold text-white shadow-lg transition-all flex items-center justify-center gap-2"
+                >
+                  <Flame className="w-4 h-4" /> Run Emotion Arc Analysis
+                </button>
+
+                {/* Diagnostic Recommendations */}
+                {valenceReport?.recommendations && valenceReport.recommendations.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t border-white/[0.08]">
+                    <span className="text-[11px] font-bold text-white uppercase tracking-wider block">
+                      Pacing & Retention Diagnostics
+                    </span>
+                    <div className="space-y-1.5">
+                      {valenceReport.recommendations.map((rec, idx) => (
+                        <div key={idx} className="p-2 rounded-xl bg-white/[0.03] border border-white/[0.06] text-xs text-slate-300">
+                          {rec}
                         </div>
                       ))}
                     </div>
@@ -4682,6 +4945,7 @@ export default function ManualStudioPage() {
                   fontSize={subtitleSize}
                   position={subtitlePosition}
                   customStyling={customSubtitleStyling}
+                  kineticPreset={kineticTypographyPreset}
                 />
               )}
 
@@ -5314,6 +5578,23 @@ export default function ManualStudioPage() {
         projectId={projectId || 'p-1'}
         projectTitle={project?.title || 'Viral Video'}
         transcriptSnippet={subtitleText || project?.description || ''}
+      />
+
+      {/* Broadcast Audio Mastering & Loudness Normalizer Modal */}
+      <AudioMasteringModal
+        isOpen={showAudioMasteringModal}
+        onClose={() => setShowAudioMasteringModal(false)}
+        onApplyProfile={(profile) => {
+          toast.success(`Applied ${profile.name} mastering profile (${profile.targetLUFS} LUFS)!`);
+        }}
+      />
+
+      {/* Universal Video Embed & Interactive Player Studio Modal */}
+      <VideoEmbedModal
+        isOpen={showVideoEmbedModal}
+        onClose={() => setShowVideoEmbedModal(false)}
+        projectId={projectId || 'p-1'}
+        videoUrl={project?.videoUrl || project?.mediaUrl || ''}
       />
     </div>
   );
