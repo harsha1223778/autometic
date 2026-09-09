@@ -52,6 +52,10 @@ import {
   Copy,
   BookOpen,
   CheckCircle2,
+  AtSign,
+  Video as VideoIcon,
+  Keyboard,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import KaraokeSubtitles from '@/components/studio/KaraokeSubtitles';
@@ -82,6 +86,22 @@ import { ChromaKeyOptions, DEFAULT_CHROMA_KEY_OPTIONS } from '@/lib/chromaKey';
 import { SPEED_RAMP_PRESETS, calculateInstantPlaybackRate, applyPlaybackSpeed, SpeedRampPreset } from '@/lib/speedRamp';
 import { evaluateViralityScore, ViralityReport } from '@/lib/viralityCoach';
 import MultiClipSequencer, { SequenceClip } from '@/components/studio/MultiClipSequencer';
+import { CALLOUT_PRESETS, ActiveCallout, CalloutPreset } from '@/lib/callouts';
+import RecordingStudioModal from '@/components/studio/RecordingStudioModal';
+import {
+  COLOR_LUT_PRESETS,
+  ColorLUTPreset,
+  ColorAdjustments,
+  DEFAULT_COLOR_ADJUSTMENTS,
+  buildCompositeFilterString,
+} from '@/lib/colorGrading';
+import KeyboardShortcutsModal from '@/components/studio/KeyboardShortcutsModal';
+import {
+  getProjectSnapshots,
+  saveProjectSnapshot,
+  deleteProjectSnapshot,
+  ProjectSnapshot,
+} from '@/lib/versionHistory';
 
 const isImageMedia = (url?: string) => {
   if (!url) return false;
@@ -120,7 +140,7 @@ export default function ManualStudioPage() {
   const [duration, setDuration] = useState(30);
 
   // Studio Tools & Properties State
-  const [activeTab, setActiveTab] = useState<'media' | 'stock' | 'sequence' | 'voice' | 'script' | 'sfx' | 'transitions' | 'speed' | 'chroma' | 'coach' | 'seo' | 'reframe' | 'trim' | 'audio' | 'subtitles' | 'filters'>('media');
+  const [activeTab, setActiveTab] = useState<'media' | 'stock' | 'sequence' | 'voice' | 'script' | 'sfx' | 'transitions' | 'callouts' | 'speed' | 'chroma' | 'coach' | 'seo' | 'reframe' | 'trim' | 'audio' | 'subtitles' | 'filters' | 'history'>('media');
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
   const [selectedOverlayPosition, setSelectedOverlayPosition] = useState<'top-right' | 'center' | 'lower-third'>('top-right');
   const [overlayDuration, setOverlayDuration] = useState(4.0);
@@ -181,6 +201,26 @@ export default function ManualStudioPage() {
 
   // 9. AI Virality Score & Retention Coach State
   const [viralityReport, setViralityReport] = useState<ViralityReport | null>(null);
+
+  // 10. Social Callouts & Lower-Thirds State
+  const [selectedCalloutPreset, setSelectedCalloutPreset] = useState('social-youtube');
+  const [calloutTitle, setCalloutTitle] = useState('Subscribe on YouTube');
+  const [calloutSubtitle, setCalloutSubtitle] = useState('@channel');
+  const [calloutPosition, setCalloutPosition] = useState<'bottom-left' | 'bottom-center' | 'bottom-right' | 'top-right'>('bottom-left');
+  const [calloutDuration, setCalloutDuration] = useState(3.5);
+
+  // 11. Webcam / Screen Recording & Teleprompter State
+  const [showRecordingModal, setShowRecordingModal] = useState(false);
+
+  // 12. Cinematic Color LUTs & Manual Grading State
+  const [selectedLUTPreset, setSelectedLUTPreset] = useState('clean');
+  const [colorAdjustments, setColorAdjustments] = useState<ColorAdjustments>(DEFAULT_COLOR_ADJUSTMENTS);
+
+  // 13. Keyboard Shortcuts Modal State
+  const [showKeyboardShortcutsModal, setShowKeyboardShortcutsModal] = useState(false);
+
+  // 14. Project Snapshots & Version History State
+  const [snapshots, setSnapshots] = useState<ProjectSnapshot[]>([]);
 
   // Trim & Audio State
   const [trimStart, setTrimStart] = useState(0);
@@ -295,6 +335,10 @@ export default function ManualStudioPage() {
         if (data?.tracks) setMusicTracks(data.tracks);
       })
       .catch(() => {});
+
+    if (projectId) {
+      setSnapshots(getProjectSnapshots(projectId));
+    }
   }, [projectId]);
 
   const addOperation = (type: string, name: string, details: Record<string, any>) => {
@@ -402,6 +446,191 @@ export default function ManualStudioPage() {
     });
     toast.success('Deleted selected clip segment');
   };
+
+  const togglePlay = () => {
+    if (!videoRef.current) return;
+    if (isPlaying) {
+      videoRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      videoRef.current.play();
+      setIsPlaying(true);
+    }
+  };
+
+  // 10. Social Callouts & Lower-Thirds Handler
+  const handleInsertCallout = () => {
+    const preset = CALLOUT_PRESETS.find((p) => p.id === selectedCalloutPreset) || CALLOUT_PRESETS[0];
+    const start = parseFloat(currentTime.toFixed(1));
+    addOperation('callout_badge', `Callout: ${calloutTitle || preset.name}`, {
+      presetId: preset.id,
+      title: calloutTitle || preset.defaultTitle,
+      subtitle: calloutSubtitle || preset.defaultSubtitle,
+      position: calloutPosition,
+      startTime: start,
+      duration: calloutDuration,
+    });
+    toast.success(`Inserted "${preset.name}" callout at ${formatTime(start)} (${calloutDuration}s)`);
+  };
+
+  // 12. Cinematic Color LUTs & Grading Handlers
+  const handleLUTPresetSelect = (lutId: string) => {
+    setSelectedLUTPreset(lutId);
+    const lut = COLOR_LUT_PRESETS.find((p) => p.id === lutId);
+    addOperation('color_lut', `LUT: ${lut?.name || lutId}`, {
+      lutId,
+      name: lut?.name,
+    });
+    toast.success(`Applied LUT: ${lut?.name || lutId}`);
+  };
+
+  const handleResetGrading = () => {
+    setSelectedLUTPreset('clean');
+    setColorAdjustments(DEFAULT_COLOR_ADJUSTMENTS);
+    toast.info('Reset color grading to default');
+  };
+
+  // 14. Version History & Milestone Snapshots Handlers
+  const handleSaveSnapshot = (customLabel?: string) => {
+    if (!projectId) return;
+    const snapName = customLabel || `Milestone ${snapshots.length + 1} (${formatTime(currentTime)})`;
+    const updated = saveProjectSnapshot(projectId, {
+      name: snapName,
+      operations,
+      trimStart,
+      trimEnd,
+      subtitleText,
+      aspectRatio,
+      selectedFilter: selectedLUTPreset,
+    });
+    setSnapshots(updated);
+    toast.success(`Saved snapshot "${snapName}"`);
+  };
+
+  const handleRestoreSnapshot = (snapshot: ProjectSnapshot) => {
+    if (confirm(`Restore snapshot "${snapshot.name}"? Your current timeline will be rolled back.`)) {
+      setOperations(snapshot.operations);
+      setTrimStart(snapshot.trimStart);
+      setTrimEnd(snapshot.trimEnd);
+      if (snapshot.subtitleText !== undefined) setSubtitleText(snapshot.subtitleText);
+      if (snapshot.aspectRatio) setAspectRatio(snapshot.aspectRatio as any);
+      if (snapshot.selectedFilter) setSelectedLUTPreset(snapshot.selectedFilter);
+      toast.success(`Restored snapshot "${snapshot.name}" (${snapshot.operations.length} actions)`);
+    }
+  };
+
+  const handleDeleteSnapshot = (snapshotId: string) => {
+    if (!projectId) return;
+    deleteProjectSnapshot(projectId, snapshotId);
+    setSnapshots(getProjectSnapshots(projectId));
+    toast.info('Snapshot deleted');
+  };
+
+  // Global NLE Keyboard Shortcuts Engine
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement as HTMLElement | null;
+      const tag = activeEl?.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || activeEl?.isContentEditable) {
+        return;
+      }
+
+      // [?] -> Open shortcuts modal
+      if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+        e.preventDefault();
+        setShowKeyboardShortcutsModal((prev) => !prev);
+        return;
+      }
+
+      // [Space] -> Toggle Play/Pause
+      if (e.code === 'Space') {
+        e.preventDefault();
+        togglePlay();
+        return;
+      }
+
+      // [J] -> Rewind 2s
+      if (e.key === 'j' || e.key === 'J') {
+        e.preventDefault();
+        if (videoRef.current) {
+          videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 2);
+          setCurrentTime(videoRef.current.currentTime);
+        }
+        return;
+      }
+
+      // [K] -> Pause
+      if (e.key === 'k' || e.key === 'K') {
+        e.preventDefault();
+        if (videoRef.current && !videoRef.current.paused) {
+          videoRef.current.pause();
+          setIsPlaying(false);
+        }
+        return;
+      }
+
+      // [L] -> Forward 2s
+      if (e.key === 'l' || e.key === 'L') {
+        e.preventDefault();
+        if (videoRef.current) {
+          videoRef.current.currentTime = Math.min(duration, videoRef.current.currentTime + 2);
+          setCurrentTime(videoRef.current.currentTime);
+        }
+        return;
+      }
+
+      // [S] -> Split Clip at Cursor
+      if (e.key === 's' || e.key === 'S') {
+        e.preventDefault();
+        handleSplitClip();
+        return;
+      }
+
+      // [I] -> Set In-Point (trimStart)
+      if (e.key === 'i' || e.key === 'I') {
+        e.preventDefault();
+        setTrimStart(currentTime);
+        toast.info(`In-point set to ${formatTime(currentTime)}`);
+        return;
+      }
+
+      // [O] -> Set Out-Point (trimEnd)
+      if (e.key === 'o' || e.key === 'O') {
+        e.preventDefault();
+        setTrimEnd(currentTime);
+        toast.info(`Out-point set to ${formatTime(currentTime)}`);
+        return;
+      }
+
+      // [M] -> Audio Mute Toggle
+      if (e.key === 'm' || e.key === 'M') {
+        e.preventDefault();
+        setIsMuted((prev) => {
+          if (videoRef.current) videoRef.current.muted = !prev;
+          return !prev;
+        });
+        toast.info('Toggled audio mute');
+        return;
+      }
+
+      // [Ctrl+Z] -> Undo
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z') && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+        return;
+      }
+
+      // [Ctrl+Y] or [Ctrl+Shift+Z] -> Redo
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y' || (e.shiftKey && (e.key === 'z' || e.key === 'Z')))) {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [currentTime, duration, isPlaying, operations, redoStack, trimStart, trimEnd]);
 
   const handleSaveDraft = async () => {
     setSavingDraft(true);
@@ -754,12 +983,26 @@ export default function ManualStudioPage() {
           motionPreset: selectedMotionPreset,
         }));
 
+      const activeCallouts: ActiveCallout[] = operations
+        .filter((op) => op.type === 'callout_badge' && op.details)
+        .map((op) => ({
+          id: op.id,
+          presetId: op.details.presetId || 'social-youtube',
+          title: op.details.title || op.name,
+          subtitle: op.details.subtitle || '',
+          startTime: Number(op.details.startTime) || 0,
+          duration: Number(op.details.duration) || 3.5,
+          position: op.details.position || 'bottom-left',
+        }));
+
       const outputBlob = await renderStudioComposition({
         videoElement: isImg ? null : videoRef.current,
         imageSrc: isImg ? mediaSrc : null,
         aspectRatio: targetAspect,
         reframeMode,
         filter: selectedFilter,
+        colorLUT: selectedLUTPreset !== 'clean' ? selectedLUTPreset : undefined,
+        colorAdjustments: colorAdjustments,
         transitionType: selectedTransition,
         chromaKey: chromaKeyOptions.enabled ? chromaKeyOptions : undefined,
         duration: Math.min(30, trimEnd - trimStart || duration),
@@ -772,6 +1015,7 @@ export default function ManualStudioPage() {
             }
           : undefined,
         overlays: activeOverlays,
+        callouts: activeCallouts,
         musicUrl: musicTrack?.url || null,
         musicVolume: musicVolume / 100,
         onProgress: (pct, stage) => {
@@ -833,6 +1077,8 @@ export default function ManualStudioPage() {
     bw: 'grayscale(1) contrast(1.2)',
   };
 
+  const activeCompositeFilter = `${filterStyles[selectedFilter] || ''} ${buildCompositeFilterString(selectedLUTPreset, colorAdjustments)}`.trim();
+
   return (
     <div className="min-h-screen bg-[#06080F] text-slate-100 flex flex-col">
       {/* Studio Top Control Bar */}
@@ -892,9 +1138,26 @@ export default function ManualStudioPage() {
             onClick={handleRedo}
             disabled={redoStack.length === 0}
             className="p-2 rounded-xl text-slate-300 hover:text-white hover:bg-white/[0.05] disabled:opacity-30 transition-all"
-            title="Redo"
+            title="Redo (Ctrl+Y)"
           >
             <Redo className="w-4 h-4" />
+          </button>
+          <div className="h-4 w-px bg-white/10 mx-1" />
+          <button
+            onClick={() => setShowRecordingModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-xs font-semibold text-rose-300 border border-rose-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+            title="Record Camera / Screen with AI Teleprompter"
+          >
+            <VideoIcon className="w-3.5 h-3.5 text-rose-400" />
+            <span className="hidden sm:inline">Record</span>
+          </button>
+          <button
+            onClick={() => setShowKeyboardShortcutsModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] text-xs font-medium text-slate-200 transition-all flex items-center gap-1.5"
+            title="NLE Keyboard Shortcuts (?)"
+          >
+            <Keyboard className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">Hotkeys</span>
           </button>
           <div className="h-4 w-px bg-white/10 mx-1" />
           <button
@@ -946,6 +1209,8 @@ export default function ManualStudioPage() {
               { id: 'media', label: 'Media', icon: ImageIcon },
               { id: 'sequence', label: 'Multi-Clip', icon: Layers },
               { id: 'stock', label: 'B-Roll', icon: Flame },
+              { id: 'callouts', label: 'Callouts', icon: AtSign },
+              { id: 'filters', label: 'LUTs/Grading', icon: SlidersHorizontal },
               { id: 'script', label: 'Script', icon: FileText },
               { id: 'voice', label: 'Voice', icon: Mic },
               { id: 'sfx', label: 'SFX', icon: Volume1 },
@@ -958,7 +1223,7 @@ export default function ManualStudioPage() {
               { id: 'trim', label: 'Jumpcut', icon: Scissors },
               { id: 'audio', label: 'Audio', icon: Volume2 },
               { id: 'subtitles', label: 'Subs', icon: Type },
-              { id: 'filters', label: 'Filter', icon: Palette },
+              { id: 'history', label: 'Snapshots', icon: History },
             ].map((tab) => {
               const Icon = tab.icon;
               return (
@@ -2375,32 +2640,380 @@ export default function ManualStudioPage() {
               </div>
             )}
 
-            {activeTab === 'filters' && (
+            {activeTab === 'callouts' && (
               <div className="space-y-4">
-                <h4 className="text-xs font-bold text-white uppercase tracking-wider">Color Grade LUTs</h4>
-                <div className="grid grid-cols-2 gap-2.5">
-                  {[
-                    { id: 'clean', name: 'Clean Neutral' },
-                    { id: 'warm', name: 'Warm Sunset' },
-                    { id: 'cool', name: 'Cool Futuristic' },
-                    { id: 'cinematic', name: 'Cinematic Mood' },
-                    { id: 'bw', name: 'Monochrome Noir' },
-                  ].map((filter) => (
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <AtSign className="w-3.5 h-3.5 text-cyan-400" /> Social Callouts & Badges
+                  </h4>
+                  <span className="text-[10px] text-purple-400 font-mono font-semibold">
+                    {operations.filter((op) => op.type === 'callout_badge').length} Active
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  Add eye-catching lower-third banners, subscriber badges, and follow prompts with spring physics.
+                </p>
+
+                {/* Preset Selector */}
+                <div className="space-y-2">
+                  <label className="text-[11px] font-semibold text-slate-300">Preset Template</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {CALLOUT_PRESETS.map((preset) => (
+                      <button
+                        key={preset.id}
+                        onClick={() => {
+                          setSelectedCalloutPreset(preset.id);
+                          setCalloutTitle(preset.defaultTitle);
+                          setCalloutSubtitle(preset.defaultSubtitle);
+                        }}
+                        className={`p-2.5 rounded-xl border text-left text-xs transition-all flex flex-col gap-1 ${
+                          selectedCalloutPreset === preset.id
+                            ? 'bg-purple-600/25 border-purple-500 text-white font-bold shadow-sm'
+                            : 'bg-white/[0.02] border-white/[0.08] text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="w-5 h-5 rounded-md flex items-center justify-center text-[11px] font-bold"
+                            style={{ backgroundColor: `${preset.badgeColor}30`, color: preset.badgeColor }}
+                          >
+                            {preset.icon}
+                          </span>
+                          <span className="truncate font-semibold">{preset.name}</span>
+                        </div>
+                        <span className="text-[10px] opacity-70 truncate">{preset.defaultTitle}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Custom Text Fields */}
+                <div className="space-y-2.5">
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-300 block mb-1">Headline Text</label>
+                    <input
+                      type="text"
+                      value={calloutTitle}
+                      onChange={(e) => setCalloutTitle(e.target.value)}
+                      placeholder="e.g. Subscribe on YouTube"
+                      className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 font-medium"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold text-slate-300 block mb-1">Subtitle / Handle</label>
+                    <input
+                      type="text"
+                      value={calloutSubtitle}
+                      onChange={(e) => setCalloutSubtitle(e.target.value)}
+                      placeholder="e.g. @yourchannel"
+                      className="w-full bg-white/[0.04] border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Position & Duration */}
+                <div className="space-y-2">
+                  <label className="text-[11px] font-semibold text-slate-300 block">Position on Screen</label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {[
+                      { id: 'bottom-left', label: 'Bottom Left' },
+                      { id: 'bottom-center', label: 'Bottom Center' },
+                      { id: 'bottom-right', label: 'Bottom Right' },
+                      { id: 'top-right', label: 'Top Right' },
+                    ].map((pos) => (
+                      <button
+                        key={pos.id}
+                        onClick={() => setCalloutPosition(pos.id as any)}
+                        className={`py-1.5 px-2 rounded-xl text-[11px] border font-medium transition-all ${
+                          calloutPosition === pos.id
+                            ? 'bg-cyan-500/20 border-cyan-500/60 text-cyan-300 font-bold'
+                            : 'bg-white/[0.02] border-white/[0.08] text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {pos.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-xs text-slate-300">
+                    <span>Display Duration</span>
+                    <span className="font-mono text-cyan-400">{calloutDuration}s</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={10}
+                    step={0.5}
+                    value={calloutDuration}
+                    onChange={(e) => setCalloutDuration(parseFloat(e.target.value))}
+                    className="w-full accent-cyan-500"
+                  />
+                </div>
+
+                {/* Insert Button */}
+                <button
+                  onClick={handleInsertCallout}
+                  className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-xs font-bold text-white shadow-lg transition-all flex items-center justify-center gap-2"
+                >
+                  <Plus className="w-4 h-4" /> Insert Callout at {formatTime(currentTime)}
+                </button>
+
+                {/* Active Callouts on Timeline */}
+                <div className="space-y-2 pt-2 border-t border-white/[0.08]">
+                  <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block">
+                    Callouts on Timeline
+                  </span>
+                  {operations.filter((op) => op.type === 'callout_badge').length === 0 ? (
+                    <p className="text-[11px] text-slate-500 italic">No callouts added yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {operations
+                        .filter((op) => op.type === 'callout_badge')
+                        .map((op) => (
+                          <div
+                            key={op.id}
+                            className="p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.08] flex items-center justify-between text-xs"
+                          >
+                            <div className="truncate">
+                              <span className="font-semibold text-white truncate block">{op.name}</span>
+                              <span className="text-[10px] text-cyan-400 font-mono">
+                                @ {formatTime(op.details?.startTime || 0)} ({op.details?.duration || 3}s)
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => handleRemoveOverlayOp(op.id)}
+                              className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                              title="Delete Callout"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'filters' && (
+              <div className="space-y-5">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                      <SlidersHorizontal className="w-3.5 h-3.5 text-purple-400" /> Hollywood LUT Presets
+                    </h4>
                     <button
-                      key={filter.id}
-                      onClick={() => {
-                        setSelectedFilter(filter.id as any);
-                        addOperation('color_grade', `Filter: ${filter.name}`, { filter: filter.id });
-                      }}
-                      className={`p-3 rounded-xl border text-xs text-left transition-all ${
-                        selectedFilter === filter.id
-                          ? 'bg-purple-600/30 border-purple-500 text-white font-bold'
-                          : 'bg-white/[0.02] border-white/[0.08] text-slate-400 hover:text-white'
-                      }`}
+                      onClick={handleResetGrading}
+                      className="text-[10px] text-slate-400 hover:text-white flex items-center gap-1 underline"
                     >
-                      {filter.name}
+                      <RotateCcw className="w-3 h-3" /> Reset
                     </button>
-                  ))}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {COLOR_LUT_PRESETS.map((lut) => (
+                      <button
+                        key={lut.id}
+                        onClick={() => handleLUTPresetSelect(lut.id)}
+                        className={`p-2.5 rounded-xl border text-left text-xs transition-all ${
+                          selectedLUTPreset === lut.id
+                            ? 'bg-purple-600/30 border-purple-500 text-white font-bold shadow-sm'
+                            : 'bg-white/[0.02] border-white/[0.08] text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="font-bold truncate text-white">{lut.name}</div>
+                        <div className="text-[10px] opacity-70 truncate">{lut.description}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Legacy Base Filters */}
+                <div className="space-y-2 pt-2 border-t border-white/[0.08]">
+                  <label className="text-[11px] font-semibold text-slate-300 block">Base Tint Profiles</label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {[
+                      { id: 'clean', name: 'Clean' },
+                      { id: 'warm', name: 'Warm' },
+                      { id: 'cool', name: 'Cool' },
+                      { id: 'cinematic', name: 'Cinema' },
+                      { id: 'bw', name: 'B&W' },
+                    ].map((filter) => (
+                      <button
+                        key={filter.id}
+                        onClick={() => setSelectedFilter(filter.id as any)}
+                        className={`py-1.5 px-2 rounded-xl border text-[11px] text-center transition-all ${
+                          selectedFilter === filter.id
+                            ? 'bg-indigo-600/30 border-indigo-500 text-white font-bold'
+                            : 'bg-white/[0.02] border-white/[0.08] text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        {filter.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Custom Color Grading Sliders */}
+                <div className="space-y-3 pt-2 border-t border-white/[0.08]">
+                  <h4 className="text-[11px] font-bold text-slate-300 uppercase tracking-wider">
+                    Precision Sliders
+                  </h4>
+
+                  {/* Brightness */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs text-slate-300">
+                      <span>Brightness</span>
+                      <span className="font-mono text-cyan-400">{colorAdjustments.brightness > 0 ? `+${colorAdjustments.brightness}` : colorAdjustments.brightness}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={-50}
+                      max={50}
+                      value={colorAdjustments.brightness}
+                      onChange={(e) =>
+                        setColorAdjustments((prev) => ({ ...prev, brightness: parseInt(e.target.value, 10) }))
+                      }
+                      className="w-full accent-purple-500"
+                    />
+                  </div>
+
+                  {/* Contrast */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs text-slate-300">
+                      <span>Contrast</span>
+                      <span className="font-mono text-cyan-400">{colorAdjustments.contrast > 0 ? `+${colorAdjustments.contrast}` : colorAdjustments.contrast}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={-50}
+                      max={50}
+                      value={colorAdjustments.contrast}
+                      onChange={(e) =>
+                        setColorAdjustments((prev) => ({ ...prev, contrast: parseInt(e.target.value, 10) }))
+                      }
+                      className="w-full accent-purple-500"
+                    />
+                  </div>
+
+                  {/* Saturation */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs text-slate-300">
+                      <span>Saturation</span>
+                      <span className="font-mono text-cyan-400">{colorAdjustments.saturation > 0 ? `+${colorAdjustments.saturation}` : colorAdjustments.saturation}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={-50}
+                      max={100}
+                      value={colorAdjustments.saturation}
+                      onChange={(e) =>
+                        setColorAdjustments((prev) => ({ ...prev, saturation: parseInt(e.target.value, 10) }))
+                      }
+                      className="w-full accent-purple-500"
+                    />
+                  </div>
+
+                  {/* Temperature */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs text-slate-300">
+                      <span>Color Temperature</span>
+                      <span className="font-mono text-cyan-400">{colorAdjustments.temperature > 0 ? `+${colorAdjustments.temperature} Warm` : colorAdjustments.temperature < 0 ? `${colorAdjustments.temperature} Cool` : '0 Neutral'}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={-50}
+                      max={50}
+                      value={colorAdjustments.temperature}
+                      onChange={(e) =>
+                        setColorAdjustments((prev) => ({ ...prev, temperature: parseInt(e.target.value, 10) }))
+                      }
+                      className="w-full accent-amber-500"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'history' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <History className="w-3.5 h-3.5 text-purple-400" /> Version History & Snapshots
+                  </h4>
+                  <span className="text-[10px] text-purple-300 font-mono font-semibold">
+                    {snapshots.length} Snapshots
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  Save snapshot checkpoints of your project timeline and roll back anytime with zero data loss.
+                </p>
+
+                {/* Create Snapshot Button */}
+                <button
+                  onClick={() => handleSaveSnapshot()}
+                  className="w-full py-2.5 px-4 rounded-xl bg-purple-600 hover:bg-purple-500 text-xs font-bold text-white shadow-lg transition-all flex items-center justify-center gap-2"
+                >
+                  <Save className="w-4 h-4" /> Save Current Milestone
+                </button>
+
+                {/* Snapshots List */}
+                <div className="space-y-2 pt-2 border-t border-white/[0.08]">
+                  <span className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider block">
+                    Saved Checkpoints
+                  </span>
+
+                  {snapshots.length === 0 ? (
+                    <div className="p-4 rounded-xl bg-white/[0.02] border border-dashed border-white/10 text-center space-y-1">
+                      <p className="text-xs text-slate-400 font-medium">No snapshots saved yet</p>
+                      <p className="text-[10px] text-slate-500">
+                        Click "Save Current Milestone" or press [M] to create a rollback checkpoint.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {snapshots.map((snap) => (
+                        <div
+                          key={snap.id}
+                          className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.08] hover:border-purple-500/40 transition-all space-y-2"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <span className="font-bold text-xs text-white block">{snap.name}</span>
+                              <span className="text-[10px] text-slate-400">
+                                {snap.formattedTime}
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => handleDeleteSnapshot(snap.id)}
+                              className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                              title="Delete Snapshot"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          <div className="flex items-center gap-2 text-[10px] font-mono text-cyan-300/90 bg-black/30 px-2 py-1 rounded-lg">
+                            <span>{snap.operations.length} actions</span>
+                            <span>•</span>
+                            <span>{snap.aspectRatio}</span>
+                            <span>•</span>
+                            <span>LUT: {snap.selectedFilter || 'clean'}</span>
+                          </div>
+
+                          <button
+                            onClick={() => handleRestoreSnapshot(snap)}
+                            className="w-full py-1.5 px-3 rounded-lg bg-white/[0.06] hover:bg-purple-600/30 text-xs font-semibold text-purple-300 hover:text-white border border-purple-500/30 transition-all flex items-center justify-center gap-1.5"
+                          >
+                            <RotateCcw className="w-3 h-3" /> Restore Snapshot
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -2460,7 +3073,7 @@ export default function ManualStudioPage() {
                                 ? 'object-cover'
                                 : 'object-contain'
                             }`}
-                            style={{ filter: filterStyles[selectedFilter] }}
+                            style={{ filter: activeCompositeFilter || undefined }}
                           />
                           <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-cyan-600/90 text-white text-[11px] font-bold shadow-lg flex items-center gap-1.5 backdrop-blur-md">
                             <ImageIcon className="w-3.5 h-3.5" /> Image Asset Preview
@@ -2475,7 +3088,7 @@ export default function ManualStudioPage() {
                               ? 'object-cover'
                               : 'object-contain'
                           }`}
-                          style={{ filter: filterStyles[selectedFilter] }}
+                          style={{ filter: activeCompositeFilter || undefined }}
                           onTimeUpdate={() => {
                             if (videoRef.current) setCurrentTime(videoRef.current.currentTime);
                           }}
@@ -2562,6 +3175,65 @@ export default function ManualStudioPage() {
                     );
                   }
                   return null;
+                })}
+
+              {/* Active Animated Social Callouts & Lower-Thirds Preview Overlay */}
+              {operations
+                .filter((op) => op.type === 'callout_badge' && op.details)
+                .filter(
+                  (op) =>
+                    currentTime >= Number(op.details.startTime) &&
+                    currentTime <= Number(op.details.startTime) + Number(op.details.duration)
+                )
+                .map((op) => {
+                  const pos = op.details.position || 'bottom-left';
+                  const posClasses =
+                    pos === 'top-right'
+                      ? 'top-5 right-5'
+                      : pos === 'bottom-center'
+                      ? 'bottom-14 left-1/2 -translate-x-1/2'
+                      : pos === 'bottom-right'
+                      ? 'bottom-14 right-5'
+                      : 'bottom-14 left-5';
+                  const preset = CALLOUT_PRESETS.find((p) => p.id === op.details.presetId) || CALLOUT_PRESETS[0];
+
+                  return (
+                    <div
+                      key={op.id}
+                      className={`absolute z-30 pointer-events-none transition-all duration-300 animate-in fade-in slide-in-from-bottom-2 ${posClasses}`}
+                    >
+                      <div
+                        className="flex items-center gap-3 px-4 py-2.5 rounded-2xl shadow-2xl border backdrop-blur-md bg-black/85"
+                        style={{
+                          borderColor: `${preset.badgeColor}80`,
+                        }}
+                      >
+                        <div
+                          className="w-8 h-8 rounded-xl flex items-center justify-center font-bold text-sm shadow-md"
+                          style={{
+                            backgroundColor: preset.badgeColor,
+                            color: '#FFFFFF',
+                          }}
+                        >
+                          {preset.icon}
+                        </div>
+                        <div className="flex flex-col">
+                          <span
+                            className="text-xs font-black tracking-wide text-white"
+                          >
+                            {op.details.title || op.name}
+                          </span>
+                          {op.details.subtitle && (
+                            <span
+                              className="text-[10px] font-medium opacity-80 text-slate-300"
+                            >
+                              {op.details.subtitle}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
                 })}
             </div>
           </div>
@@ -2818,6 +3490,29 @@ export default function ManualStudioPage() {
         imageSrc={isImageMedia(project?.originalVideoUrl) ? project?.originalVideoUrl : null}
         projectTitle={project?.title || 'Viral Video'}
         aspectRatio={aspectRatio}
+      />
+
+      {/* In-Studio Webcam & Screen Recorder with AI Teleprompter Modal */}
+      <RecordingStudioModal
+        isOpen={showRecordingModal}
+        onClose={() => setShowRecordingModal(false)}
+        onAddRecordingToStudio={(recordedAsset) => {
+          setMediaAssets((prev) => [recordedAsset, ...prev]);
+          handleAddAssetToSequence(recordedAsset);
+          addOperation('record_clip', `Recorded: ${recordedAsset.name}`, {
+            id: recordedAsset.id,
+            duration: recordedAsset.duration,
+            url: recordedAsset.url,
+          });
+          toast.success(`🎬 Recording added to project assets & multi-clip sequence!`);
+        }}
+        teleprompterScript={voiceoverScript || subtitleText}
+      />
+
+      {/* NLE Keyboard Shortcuts Cheat Sheet Modal */}
+      <KeyboardShortcutsModal
+        isOpen={showKeyboardShortcutsModal}
+        onClose={() => setShowKeyboardShortcutsModal(false)}
       />
     </div>
   );

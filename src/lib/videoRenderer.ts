@@ -6,13 +6,17 @@
 
 import { computeMotionTransform, applyCanvasTransitionFX } from './transitions';
 import { ChromaKeyOptions, applyChromaKeyToCanvas } from './chromaKey';
+import { ActiveCallout, renderCalloutOnCanvas } from './callouts';
+import { applyLUTOverlayTint, ColorAdjustments } from './colorGrading';
 
 export interface RenderOptions {
   videoElement: HTMLVideoElement | null;
   imageSrc?: string | null;
   aspectRatio: '16:9' | '9:16' | '1:1';
   reframeMode?: 'blurred-letterbox' | 'crop-center' | 'black-bars';
-  filter?: 'clean' | 'warm' | 'cool' | 'cinematic' | 'bw';
+  filter?: string;
+  colorLUT?: string;
+  colorAdjustments?: ColorAdjustments;
   duration: number;
   transitionType?: string;
   chromaKey?: ChromaKeyOptions;
@@ -32,6 +36,7 @@ export interface RenderOptions {
     position?: 'top-right' | 'center' | 'lower-third';
     motionPreset?: string;
   }>;
+  callouts?: ActiveCallout[];
   musicUrl?: string | null;
   musicVolume?: number;
   onProgress?: (progressPct: number, stage: string) => void;
@@ -378,6 +383,22 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
           ctx.fillText(subtitles.text, width / 2, subY);
         }
         ctx.restore();
+      }
+
+      // 5. Draw Active Social Callouts & Lower-Thirds
+      if (options.callouts && options.callouts.length > 0) {
+        for (const callout of options.callouts) {
+          const calloutEnd = callout.startTime + (callout.duration || 3);
+          if (currentTime >= callout.startTime && currentTime <= calloutEnd) {
+            const progress = (currentTime - callout.startTime) / (callout.duration || 3);
+            renderCalloutOnCanvas(ctx, callout, width, height, progress);
+          }
+        }
+      }
+
+      // 6. Apply Color LUT Overlay Tint if configured
+      if (options.colorLUT) {
+        applyLUTOverlayTint(ctx, width, height, options.colorLUT);
       }
 
       currentFrame++;
