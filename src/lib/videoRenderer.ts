@@ -12,6 +12,7 @@ import { ActiveSticker, renderStickerOnCanvas } from './stickerEngine';
 import { calculateKenBurnsTransform } from './kenBurns';
 import { renderSplitScreenComposite } from './splitScreen';
 import { calculateCameraShakeOffset, applyCameraShakeToCanvas } from './motionBlur';
+import { BrandKit, calculateLogoPlacement } from './brandKit';
 
 export interface RenderOptions {
   videoElement: HTMLVideoElement | null;
@@ -24,6 +25,7 @@ export interface RenderOptions {
     duration: number;
     intensity?: number;
   };
+  brandKit?: BrandKit;
   aspectRatio: '16:9' | '9:16' | '1:1';
   reframeMode?: 'blurred-letterbox' | 'crop-center' | 'black-bars';
   filter?: string;
@@ -146,6 +148,21 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
       if (loadedSecondaryImage) {
         loadedSecondaryImage.onload = res;
         loadedSecondaryImage.onerror = res;
+      }
+      setTimeout(res, 2000);
+    });
+  }
+
+  // Pre-load brand watermark logo if enabled
+  let loadedBrandLogo: HTMLImageElement | null = null;
+  if (options.brandKit?.enabled && options.brandKit.logoUrl) {
+    loadedBrandLogo = new Image();
+    loadedBrandLogo.crossOrigin = 'anonymous';
+    loadedBrandLogo.src = options.brandKit.logoUrl;
+    await new Promise((res) => {
+      if (loadedBrandLogo) {
+        loadedBrandLogo.onload = res;
+        loadedBrandLogo.onerror = res;
       }
       setTimeout(res, 2000);
     });
@@ -459,6 +476,41 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
       // 8. Apply Color LUT Overlay Tint if configured
       if (options.colorLUT) {
         applyLUTOverlayTint(ctx, width, height, options.colorLUT);
+      }
+
+      // 9. Draw Custom Brand Watermark & Creator Handle Badge
+      if (options.brandKit?.enabled && loadedBrandLogo && loadedBrandLogo.complete) {
+        ctx.save();
+        ctx.globalAlpha = options.brandKit.logoOpacity || 0.85;
+        const logoSize = options.brandKit.logoSizePx || 80;
+        const logoAspect = (loadedBrandLogo.naturalWidth || 1) / (loadedBrandLogo.naturalHeight || 1);
+        const logoW = logoSize * logoAspect;
+        const logoH = logoSize;
+        const pos = calculateLogoPlacement(
+          options.brandKit.logoPosition || 'top-right',
+          width,
+          height,
+          logoW,
+          logoH,
+          28
+        );
+
+        ctx.shadowColor = 'rgba(0,0,0,0.6)';
+        ctx.shadowBlur = 10;
+        ctx.drawImage(loadedBrandLogo, pos.x, pos.y, logoW, logoH);
+
+        if (options.brandKit.showHandleBadge && options.brandKit.creatorHandle) {
+          ctx.font = `bold 14px ${options.brandKit.fontFamily || 'sans-serif'}`;
+          ctx.fillStyle = options.brandKit.primaryColor || '#FFFFFF';
+          ctx.shadowColor = 'rgba(0,0,0,0.85)';
+          ctx.shadowBlur = 6;
+          const isRight = options.brandKit.logoPosition.includes('right');
+          ctx.textAlign = isRight ? 'right' : 'left';
+          const textX = isRight ? pos.x + logoW : pos.x;
+          const textY = pos.y + logoH + 18;
+          ctx.fillText(options.brandKit.creatorHandle, textX, textY);
+        }
+        ctx.restore();
       }
 
       // Restore camera shake transform

@@ -58,6 +58,9 @@ import {
   SlidersHorizontal,
   Smile,
   Activity,
+  Globe,
+  Flag,
+  Shield,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import KaraokeSubtitles from '@/components/studio/KaraokeSubtitles';
@@ -120,6 +123,12 @@ import { SPLIT_SCREEN_LAYOUTS, renderSplitScreenComposite } from '@/lib/splitScr
 import { SHAKE_PRESETS, calculateCameraShakeOffset } from '@/lib/motionBlur';
 import WebhookHubModal from '@/components/studio/WebhookHubModal';
 import { STORYBOARD_FRAMEWORKS, generateStoryboard, convertStoryboardToTimelineOperations, StoryboardScene } from '@/lib/storyboardDirector';
+import { extractViralHighlights, ExtractedHighlight } from '@/lib/momentExtractor';
+import { BrandKit, DEFAULT_BRAND_KIT, getStoredBrandKit } from '@/lib/brandKit';
+import BrandKitModal from '@/components/studio/BrandKitModal';
+import { SUPPORTED_LANGUAGES, translateTranscript } from '@/lib/translator';
+import { TimelineMarker, MARKER_TYPES, getMarkerTypeMeta } from '@/lib/timelineMarkers';
+import BatchRenderQueueModal from '@/components/studio/BatchRenderQueueModal';
 
 const isImageMedia = (url?: string) => {
   if (!url) return false;
@@ -158,7 +167,7 @@ export default function ManualStudioPage() {
   const [duration, setDuration] = useState(30);
 
   // Studio Tools & Properties State
-  const [activeTab, setActiveTab] = useState<'media' | 'stock' | 'sequence' | 'voice' | 'script' | 'sfx' | 'transitions' | 'callouts' | 'stickers' | 'retention' | 'speed' | 'chroma' | 'coach' | 'seo' | 'reframe' | 'trim' | 'audio' | 'subtitles' | 'filters' | 'history' | 'storyboard' | 'splitscreen' | 'shake'>('media');
+  const [activeTab, setActiveTab] = useState<'media' | 'stock' | 'sequence' | 'voice' | 'script' | 'sfx' | 'transitions' | 'callouts' | 'stickers' | 'retention' | 'speed' | 'chroma' | 'coach' | 'seo' | 'reframe' | 'trim' | 'audio' | 'subtitles' | 'filters' | 'history' | 'storyboard' | 'splitscreen' | 'shake' | 'highlights' | 'translate'>('media');
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
   const [selectedOverlayPosition, setSelectedOverlayPosition] = useState<'top-right' | 'center' | 'lower-third'>('top-right');
   const [overlayDuration, setOverlayDuration] = useState(4.0);
@@ -282,6 +291,30 @@ export default function ManualStudioPage() {
 
   // 24. Webhooks & Multi-Platform Automation Hub State
   const [showWebhookModal, setShowWebhookModal] = useState<boolean>(false);
+
+  // 25. AI Video Highlights & Viral Moment Extractor State
+  const [extractedHighlights, setExtractedHighlights] = useState<ExtractedHighlight[]>([]);
+  const [isExtractingHighlights, setIsExtractingHighlights] = useState<boolean>(false);
+
+  // 26. Custom Brand Kit & Watermark State
+  const [brandKit, setBrandKit] = useState<BrandKit>(DEFAULT_BRAND_KIT);
+  const [showBrandKitModal, setShowBrandKitModal] = useState<boolean>(false);
+
+  // 27. Multi-Language AI Subtitle Translator State
+  const [selectedLanguage, setSelectedLanguage] = useState<string>('es');
+  const [translatedSubtitle, setTranslatedSubtitle] = useState<string>('');
+  const [isTranslating, setIsTranslating] = useState<boolean>(false);
+
+  // 28. Timeline Marker Flags State
+  const [timelineMarkers, setTimelineMarkers] = useState<TimelineMarker[]>([
+    { id: 'mark-init-1', time: 0, type: 'hook', label: 'Hook Start', color: '#06B6D4', note: 'Primary 3-second retention window' },
+    { id: 'mark-init-2', time: 10.5, type: 'cut', label: 'Jump Cut Cue', color: '#EF4444', note: 'Pacing cadence change' },
+  ]);
+  const [selectedMarkerType, setSelectedMarkerType] = useState<TimelineMarker['type']>('cut');
+  const [markerLabelInput, setMarkerLabelInput] = useState<string>('Edit Cue');
+
+  // 29. Multi-Aspect Batch Render Queue Modal State
+  const [showBatchQueueModal, setShowBatchQueueModal] = useState<boolean>(false);
 
   // Trim & Audio State
   const [trimStart, setTrimStart] = useState(0);
@@ -1163,6 +1196,105 @@ export default function ManualStudioPage() {
     toast.success(`🎙️ Vocal Profile: ${prof?.name || profileId}`);
   };
 
+  // 13. AI Highlights & Viral Moment Extractor Handlers
+  const handleExtractHighlights = () => {
+    setIsExtractingHighlights(true);
+    try {
+      const hls = extractViralHighlights(duration || 30, subtitleText);
+      setExtractedHighlights(hls);
+      toast.success(`⚡ Extracted ${hls.length} high-retention viral micro-clips!`);
+    } catch {
+      toast.error('Failed to extract highlights');
+    } finally {
+      setIsExtractingHighlights(false);
+    }
+  };
+
+  const handleApplyHighlightRange = (hl: ExtractedHighlight) => {
+    setTrimStart(hl.startTime);
+    setTrimEnd(hl.endTime);
+    if (videoRef.current) {
+      videoRef.current.currentTime = hl.startTime;
+      setCurrentTime(hl.startTime);
+    }
+    setAspectRatio(hl.recommendedAspect);
+    const op: EditOperation = {
+      id: `op-hl-${Date.now()}`,
+      type: 'highlight_cut',
+      name: `Highlight: ${hl.title}`,
+      timestamp: new Date().toLocaleTimeString(),
+      details: {
+        startTime: hl.startTime,
+        endTime: hl.endTime,
+        duration: hl.duration,
+        aspect: hl.recommendedAspect,
+      },
+    };
+    setOperations((prev) => [op, ...prev]);
+    toast.success(`✂️ Timeline trimmed to "${hl.title}" (${hl.duration}s • ${hl.recommendedAspect})!`);
+  };
+
+  // 14. Multi-Language AI Subtitle Translator Handlers
+  const handleTranslateSubtitles = (langCode: string) => {
+    setSelectedLanguage(langCode);
+    setIsTranslating(true);
+    try {
+      const textToTranslate = subtitleText || 'Transform your content into viral high engagement videos with EditFlow AI';
+      const result = translateTranscript(textToTranslate, langCode);
+      setTranslatedSubtitle(result);
+      const targetLang = SUPPORTED_LANGUAGES.find((l) => l.code === langCode);
+      toast.success(`🌐 Translated into ${targetLang?.name || langCode} (${targetLang?.flag})!`);
+    } catch {
+      toast.error('Translation failed');
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
+  const handleApplyTranslatedToSubtitles = () => {
+    if (!translatedSubtitle) {
+      toast.error('Translate the text first');
+      return;
+    }
+    setSubtitleText(translatedSubtitle);
+    const op: EditOperation = {
+      id: `op-trans-${Date.now()}`,
+      type: 'subtitle_translated',
+      name: `Subtitles: ${selectedLanguage.toUpperCase()} Translation`,
+      timestamp: new Date().toLocaleTimeString(),
+      details: { lang: selectedLanguage, text: translatedSubtitle },
+    };
+    setOperations((prev) => [op, ...prev]);
+    toast.success(`✅ Active subtitles replaced with ${selectedLanguage.toUpperCase()} translation!`);
+  };
+
+  // 15. Timeline Marker Flags Handlers
+  const handleAddMarker = (type: TimelineMarker['type'] = selectedMarkerType, label: string = markerLabelInput) => {
+    const meta = getMarkerTypeMeta(type);
+    const newMarker: TimelineMarker = {
+      id: `marker-${Date.now()}`,
+      time: Number(currentTime.toFixed(1)),
+      type,
+      label: label.trim() || meta.name,
+      color: meta.color,
+      note: `Cue point at ${currentTime.toFixed(1)}s`,
+    };
+    setTimelineMarkers((prev) => [...prev.filter((m) => Math.abs(m.time - currentTime) > 0.3), newMarker].sort((a, b) => a.time - b.time));
+    toast.success(`📍 Added ${meta.name} marker at ${currentTime.toFixed(1)}s`);
+  };
+
+  const handleSeekToMarker = (time: number) => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = time;
+    }
+    setCurrentTime(time);
+  };
+
+  const handleDeleteMarker = (markerId: string) => {
+    setTimelineMarkers((prev) => prev.filter((m) => m.id !== markerId));
+    toast.info('Marker removed');
+  };
+
   const handleInBrowserRender = async (presetAspect?: '16:9' | '9:16' | '1:1') => {
     const targetAspect = presetAspect || aspectRatio;
     setIsRenderingLocal(true);
@@ -1215,6 +1347,7 @@ export default function ManualStudioPage() {
         secondaryMediaSrc: splitScreenLayout !== 'none' ? secondaryMediaUrl : null,
         splitScreenLayout: splitScreenLayout !== 'none' ? splitScreenLayout : undefined,
         cameraShake: activeCameraShake ? activeCameraShake : undefined,
+        brandKit: brandKit.enabled ? brandKit : undefined,
         aspectRatio: targetAspect,
         reframeMode,
         filter: selectedFilter,
@@ -1401,6 +1534,22 @@ export default function ManualStudioPage() {
             <Radio className="w-3.5 h-3.5 text-emerald-400" />
             <span className="hidden sm:inline">Webhooks</span>
           </button>
+          <button
+            onClick={() => setShowBrandKitModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-purple-600/15 hover:bg-purple-600/25 text-xs font-semibold text-purple-300 border border-purple-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+            title="Custom Brand Kit & Watermark Studio"
+          >
+            <Shield className="w-3.5 h-3.5 text-purple-400" />
+            <span className="hidden sm:inline">Brand Kit</span>
+          </button>
+          <button
+            onClick={() => setShowBatchQueueModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-cyan-600/15 hover:bg-cyan-600/25 text-xs font-semibold text-cyan-300 border border-cyan-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+            title="Simultaneous Multi-Aspect Batch Render Queue (16:9 + 9:16 + 1:1)"
+          >
+            <Layers className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden sm:inline">Batch Queue</span>
+          </button>
           <div className="h-4 w-px bg-white/10 mx-1" />
           <button
             onClick={handleSaveDraft}
@@ -1470,6 +1619,8 @@ export default function ManualStudioPage() {
               { id: 'storyboard', label: 'Storyboard', icon: Film },
               { id: 'splitscreen', label: 'Split-Screen', icon: Split },
               { id: 'shake', label: 'Shake FX', icon: Move },
+              { id: 'highlights', label: 'Highlights', icon: Flame },
+              { id: 'translate', label: 'Translate', icon: Globe },
               { id: 'history', label: 'Snapshots', icon: History },
             ].map((tab) => {
               const Icon = tab.icon;
@@ -3786,6 +3937,140 @@ export default function ManualStudioPage() {
                 </div>
               </div>
             )}
+
+            {activeTab === 'highlights' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <Flame className="w-3.5 h-3.5 text-orange-400" /> Viral Highlights Extractor
+                  </h4>
+                  <span className="text-[10px] bg-orange-500/20 text-orange-300 font-mono px-2 py-0.5 rounded-full font-bold">
+                    Shorts / Reels
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  AI scans audio pacing and dialogue keywords to extract the top 3–5 highest-retention micro-clips for TikTok and Shorts.
+                </p>
+
+                <button
+                  type="button"
+                  onClick={handleExtractHighlights}
+                  disabled={isExtractingHighlights}
+                  className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-400 hover:to-amber-400 text-black font-extrabold text-xs shadow-lg shadow-orange-500/20 flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>{isExtractingHighlights ? 'Scanning Virality Signals...' : 'Extract Top Viral Highlights'}</span>
+                </button>
+
+                {extractedHighlights.length > 0 && (
+                  <div className="space-y-2.5 pt-2 border-t border-white/[0.08]">
+                    <span className="text-[11px] font-bold text-orange-300 uppercase tracking-wider block">
+                      {extractedHighlights.length} Ranked Micro-Clips
+                    </span>
+
+                    {extractedHighlights.map((hl) => (
+                      <div
+                        key={hl.id}
+                        className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.08] space-y-2 hover:border-orange-500/40 transition-all"
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-white truncate max-w-[170px]">{hl.title}</span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-300 border border-orange-500/30 font-bold">
+                            Score: {hl.viralityScore}/100
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between text-[10px] font-mono text-slate-400">
+                          <span>{hl.startTime}s - {hl.endTime}s ({hl.duration}s)</span>
+                          <span className="bg-black/40 px-1.5 py-0.5 rounded text-cyan-300">{hl.recommendedAspect}</span>
+                        </div>
+
+                        <p className="text-[10px] text-slate-300 italic bg-black/30 p-1.5 rounded border border-white/[0.04] line-clamp-2">
+                          &quot;{hl.hookSentence}&quot;
+                        </p>
+
+                        <div className="flex gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => handleApplyHighlightRange(hl)}
+                            className="flex-1 py-1.5 px-2.5 rounded-lg bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 text-[10px] font-bold border border-orange-500/40 transition-all flex items-center justify-center gap-1"
+                          >
+                            <Scissors className="w-3 h-3" /> Load as Trim ({hl.recommendedAspect})
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'translate' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <Globe className="w-3.5 h-3.5 text-cyan-400" /> Multi-Language Translator
+                  </h4>
+                  <span className="text-[10px] bg-cyan-500/20 text-cyan-300 font-mono px-2 py-0.5 rounded-full font-bold">
+                    12 Languages
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  Localize your subtitles and voiceover into global markets with 1-click vocabulary translation.
+                </p>
+
+                {/* Language Selector Grid */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] text-slate-400 font-medium">Target Language</label>
+                  <div className="grid grid-cols-2 gap-1.5 max-h-48 overflow-y-auto pr-1">
+                    {SUPPORTED_LANGUAGES.map((lang) => (
+                      <button
+                        key={lang.code}
+                        type="button"
+                        onClick={() => handleTranslateSubtitles(lang.code)}
+                        className={`p-2 rounded-xl border text-left flex items-center gap-2 transition-all ${
+                          selectedLanguage === lang.code
+                            ? 'bg-cyan-600/30 border-cyan-400 text-white font-bold'
+                            : 'bg-black/30 border-white/[0.06] text-slate-300 hover:bg-white/[0.04]'
+                        }`}
+                      >
+                        <span className="text-base">{lang.flag}</span>
+                        <div className="truncate">
+                          <p className="text-[11px] font-semibold truncate">{lang.name}</p>
+                          <p className="text-[9px] text-slate-400 truncate">{lang.nativeName}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Live Translation Output Preview */}
+                {translatedSubtitle && (
+                  <div className="p-3 rounded-2xl bg-cyan-950/20 border border-cyan-500/30 space-y-2.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-cyan-300 flex items-center gap-1">
+                        <Check className="w-3.5 h-3.5" /> Translated Subtitle Output
+                      </span>
+                      <span className="text-[9px] font-mono text-slate-400 uppercase">
+                        {selectedLanguage}
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-white p-2.5 rounded-xl bg-black/40 border border-white/[0.06] leading-relaxed">
+                      {translatedSubtitle}
+                    </p>
+
+                    <button
+                      type="button"
+                      onClick={handleApplyTranslatedToSubtitles}
+                      className="w-full py-2 px-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-black font-extrabold text-xs shadow-md shadow-cyan-500/20 flex items-center justify-center gap-1.5 transition-all"
+                    >
+                      <Check className="w-3.5 h-3.5" /> Apply Translated Subtitles to Video
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -3911,6 +4196,38 @@ export default function ManualStudioPage() {
                             </div>
                           )}
                         </>
+                      )}
+
+                      {/* Custom Creator Brand Kit & Watermark Live Overlay */}
+                      {brandKit.enabled && brandKit.logoUrl && (
+                        <div
+                          className={`absolute z-25 pointer-events-none transition-all ${
+                            brandKit.logoPosition === 'top-left'
+                              ? 'top-4 left-4'
+                              : brandKit.logoPosition === 'bottom-left'
+                              ? 'bottom-4 left-4'
+                              : brandKit.logoPosition === 'bottom-right'
+                              ? 'bottom-4 right-4 text-right'
+                              : 'top-4 right-4 text-right'
+                          }`}
+                          style={{ opacity: brandKit.logoOpacity }}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={brandKit.logoUrl}
+                            alt="Creator Brand Watermark"
+                            className="object-contain drop-shadow-lg inline-block"
+                            style={{ width: `${Math.round(brandKit.logoSizePx * 0.75)}px` }}
+                          />
+                          {brandKit.showHandleBadge && brandKit.creatorHandle && (
+                            <p
+                              className="text-[10px] font-bold drop-shadow tracking-tight mt-1"
+                              style={{ color: brandKit.primaryColor }}
+                            >
+                              {brandKit.creatorHandle}
+                            </p>
+                          )}
+                        </div>
                       )}
                     </div>
                   </>
@@ -4113,6 +4430,15 @@ export default function ManualStudioPage() {
             </div>
 
             <div className="flex items-center gap-3 text-slate-400">
+              <button
+                type="button"
+                onClick={() => handleAddMarker(selectedMarkerType, `${selectedMarkerType.toUpperCase()} ${currentTime.toFixed(1)}s`)}
+                className="px-2.5 py-1 rounded-lg bg-white/[0.05] hover:bg-rose-500/20 text-slate-300 hover:text-rose-300 text-[11px] font-semibold border border-white/10 flex items-center gap-1.5 transition-all"
+                title="Add Color-Coded Timeline Marker Flag at Playhead"
+              >
+                <Flag className="w-3.5 h-3.5 text-rose-400" />
+                <span>+ Marker</span>
+              </button>
               <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-white/5 border border-white/10">
                 1080p 60fps
               </span>
@@ -4149,7 +4475,7 @@ export default function ManualStudioPage() {
               })}
             </div>
 
-            {/* Playhead Scrubbing Rail */}
+            {/* Playhead Scrubbing Rail with Interactive Timeline Marker Flags */}
             <div
               className="relative w-full h-4 cursor-pointer"
               onClick={(e) => {
@@ -4163,9 +4489,41 @@ export default function ManualStudioPage() {
             >
               <div className="absolute top-1.5 left-0 right-0 h-1 bg-white/10 rounded-full" />
               <div
-                className="absolute top-0 w-3 h-4 bg-cyan-400 rounded-sm shadow-md shadow-cyan-400/50 -translate-x-1.5 cursor-ew-resize"
+                className="absolute top-0 w-3 h-4 bg-cyan-400 rounded-sm shadow-md shadow-cyan-400/50 -translate-x-1.5 cursor-ew-resize z-10"
                 style={{ left: `${(currentTime / (duration || 1)) * 100}%` }}
               />
+
+              {/* Color-Coded Marker Flags */}
+              {timelineMarkers.map((marker) => {
+                const markerPct = (marker.time / (duration || 1)) * 100;
+                return (
+                  <button
+                    key={marker.id}
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSeekToMarker(marker.time);
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      handleDeleteMarker(marker.id);
+                    }}
+                    title={`📍 ${marker.label} (${marker.time}s) — Click to seek, right-click to delete`}
+                    className="absolute -top-1.5 -translate-x-1/2 z-20 group flex flex-col items-center cursor-pointer"
+                    style={{ left: `${markerPct}%` }}
+                  >
+                    <Flag
+                      className="w-3.5 h-3.5 filter drop-shadow hover:scale-125 transition-transform"
+                      style={{ color: marker.color }}
+                      fill={marker.color}
+                    />
+                    <span className="hidden group-hover:block absolute bottom-4 bg-black/90 text-[9px] font-mono text-white px-1.5 py-0.5 rounded shadow whitespace-nowrap border border-white/20 z-30">
+                      {marker.label} ({marker.time}s)
+                    </span>
+                  </button>
+                );
+              })}
             </div>
 
             {/* Overlays / B-Roll Track Lane */}
@@ -4424,6 +4782,25 @@ export default function ManualStudioPage() {
         projectTitle={project?.title || 'Viral Video'}
         projectId={projectId || 'p-1'}
         duration={duration || 30}
+      />
+
+      {/* Custom Brand Kit & Watermark Studio Modal */}
+      <BrandKitModal
+        isOpen={showBrandKitModal}
+        onClose={() => setShowBrandKitModal(false)}
+        onUpdateBrandKit={(updatedKit) => {
+          setBrandKit(updatedKit);
+        }}
+      />
+
+      {/* Multi-Aspect Simultaneous Batch Render Queue Modal */}
+      <BatchRenderQueueModal
+        isOpen={showBatchQueueModal}
+        onClose={() => setShowBatchQueueModal(false)}
+        projectTitle={project?.title || 'Viral Video'}
+        onRenderAspect={async (aspect) => {
+          await handleInBrowserRender(aspect);
+        }}
       />
     </div>
   );
