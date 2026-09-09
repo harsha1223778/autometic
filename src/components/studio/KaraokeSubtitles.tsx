@@ -75,6 +75,8 @@ export function generateKaraokePhrases(rawText: string, totalDuration: number = 
   return phrases;
 }
 
+import { SubtitleStyling } from '@/lib/subtitleDesigner';
+
 interface KaraokeSubtitlesProps {
   currentTime: number;
   transcript?: string;
@@ -82,6 +84,7 @@ interface KaraokeSubtitlesProps {
   fontSize?: number;
   position?: 'bottom' | 'center' | 'top';
   customPhrases?: TimedPhrase[];
+  customStyling?: SubtitleStyling;
 }
 
 export default function KaraokeSubtitles({
@@ -91,6 +94,7 @@ export default function KaraokeSubtitles({
   fontSize = 28,
   position = 'bottom',
   customPhrases,
+  customStyling,
 }: KaraokeSubtitlesProps) {
   const phrases = useMemo(() => {
     if (customPhrases && customPhrases.length > 0) return customPhrases;
@@ -104,11 +108,18 @@ export default function KaraokeSubtitles({
 
   if (!activePhrase) return null;
 
+  const activePosition = customStyling?.position || position;
   const positionClasses = {
     top: 'top-8',
     center: 'top-1/2 -translate-y-1/2',
     bottom: 'bottom-8',
-  }[position];
+  }[activePosition];
+
+  const roundedClasses = {
+    none: 'rounded-none',
+    md: 'rounded-md',
+    full: 'rounded-full',
+  }[customStyling?.boxRounded || 'md'];
 
   return (
     <div
@@ -118,6 +129,42 @@ export default function KaraokeSubtitles({
         {activePhrase.words.map((item, idx) => {
           const isCurrentWord = currentTime >= item.start && currentTime <= item.end;
           const isPassedWord = currentTime > item.end;
+
+          if (customStyling) {
+            const fontSz = customStyling.fontSize || fontSize;
+            const textCase = customStyling.textTransform === 'uppercase' ? 'uppercase' : customStyling.textTransform === 'capitalize' ? 'capitalize' : 'normal-case';
+
+            return (
+              <span
+                key={idx}
+                className={`transition-all duration-100 inline-flex items-center gap-1 ${textCase} ${
+                  isCurrentWord
+                    ? `scale-110 px-2.5 py-1 ${roundedClasses} shadow-2xl`
+                    : isPassedWord
+                    ? 'opacity-95'
+                    : 'opacity-40'
+                }`}
+                style={{
+                  fontFamily: customStyling.fontFamily,
+                  fontSize: `${fontSz}px`,
+                  fontWeight: customStyling.fontWeight,
+                  color: isCurrentWord ? customStyling.highlightTextColor : customStyling.textColor,
+                  backgroundColor: isCurrentWord ? customStyling.highlightBgColor : 'transparent',
+                  WebkitTextStroke: customStyling.strokeWidth > 0 && !isCurrentWord
+                    ? `${customStyling.strokeWidth}px ${customStyling.strokeColor}`
+                    : 'none',
+                  textShadow: customStyling.shadowBlur > 0
+                    ? `0 2px ${customStyling.shadowBlur}px ${customStyling.shadowColor}`
+                    : 'none',
+                }}
+              >
+                <span>{item.word}</span>
+                {customStyling.showEmojis && item.emoji && isCurrentWord && (
+                  <span className="text-xl animate-bounce">{item.emoji}</span>
+                )}
+              </span>
+            );
+          }
 
           if (stylePreset === 'hormozi') {
             return (

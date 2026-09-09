@@ -129,6 +129,13 @@ import BrandKitModal from '@/components/studio/BrandKitModal';
 import { SUPPORTED_LANGUAGES, translateTranscript } from '@/lib/translator';
 import { TimelineMarker, MARKER_TYPES, getMarkerTypeMeta } from '@/lib/timelineMarkers';
 import BatchRenderQueueModal from '@/components/studio/BatchRenderQueueModal';
+import { generateAutoBrollInserts } from '@/lib/brollAutoInserter';
+import { VoicePersona, VOICE_PERSONAS, DEFAULT_VOICE_PERSONA } from '@/lib/voicePersona';
+import VoicePersonaModal from '@/components/studio/VoicePersonaModal';
+import { VELOCITY_TRANSITION_PRESETS, VelocityTransitionPreset } from '@/lib/velocityTransitions';
+import { SubtitleStyling, SUBTITLE_DESIGN_PRESETS, DEFAULT_SUBTITLE_STYLING, AVAILABLE_FONTS } from '@/lib/subtitleDesigner';
+import { ExportMatrixSettings, EXPORT_MATRIX_PRESETS, DEFAULT_EXPORT_SETTINGS } from '@/lib/exportMatrix';
+import ExportMatrixModal from '@/components/studio/ExportMatrixModal';
 
 const isImageMedia = (url?: string) => {
   if (!url) return false;
@@ -315,6 +322,14 @@ export default function ManualStudioPage() {
 
   // 29. Multi-Aspect Batch Render Queue Modal State
   const [showBatchQueueModal, setShowBatchQueueModal] = useState<boolean>(false);
+
+  // 30. Phase 5 Enterprise AI Studio & Mastering States
+  const [showVoicePersonaModal, setShowVoicePersonaModal] = useState<boolean>(false);
+  const [activeVoicePersona, setActiveVoicePersona] = useState<VoicePersona>(DEFAULT_VOICE_PERSONA);
+  const [selectedVelocityTransition, setSelectedVelocityTransition] = useState<string>('none');
+  const [customSubtitleStyling, setCustomSubtitleStyling] = useState<SubtitleStyling>(DEFAULT_SUBTITLE_STYLING);
+  const [showExportMatrixModal, setShowExportMatrixModal] = useState<boolean>(false);
+  const [exportMatrixSettings, setExportMatrixSettings] = useState<ExportMatrixSettings>(DEFAULT_EXPORT_SETTINGS);
 
   // Trim & Audio State
   const [trimStart, setTrimStart] = useState(0);
@@ -1295,8 +1310,35 @@ export default function ManualStudioPage() {
     toast.info('Marker removed');
   };
 
-  const handleInBrowserRender = async (presetAspect?: '16:9' | '9:16' | '1:1') => {
+  const handleAutoBrollInserter = () => {
+    const rawText = subtitleText || 'Transform your ideas into high impact viral videos with EditFlow AI';
+    const inserts = generateAutoBrollInserts(rawText, duration, 4.5);
+    if (inserts.length === 0) {
+      toast.info('No matching transcript keywords found for auto-insertion');
+      return;
+    }
+    const newOps: EditOperation[] = inserts.map((ins) => ({
+      id: `op-autobroll-${Date.now()}-${ins.id}`,
+      type: 'broll_clip',
+      name: `Auto B-Roll: ${ins.name} (${ins.matchedKeyword})`,
+      timestamp: new Date().toLocaleTimeString(),
+      details: {
+        assetId: ins.id,
+        name: ins.name,
+        url: ins.url,
+        startTime: ins.startTime,
+        duration: ins.duration,
+        position: 'center',
+        motionPreset: ins.motionPreset,
+      },
+    }));
+    setOperations((prev) => [...newOps, ...prev]);
+    toast.success(`🎬 Auto-inserted ${inserts.length} semantic B-roll cutaways with Ken Burns pacing!`);
+  };
+
+  const handleInBrowserRender = async (presetAspect?: '16:9' | '9:16' | '1:1', customExportSettings?: ExportMatrixSettings) => {
     const targetAspect = presetAspect || aspectRatio;
+    const activeExportMatrix = customExportSettings || exportMatrixSettings;
     setIsRenderingLocal(true);
     setShowExportModal(false);
     try {
@@ -1354,7 +1396,10 @@ export default function ManualStudioPage() {
         colorLUT: selectedLUTPreset !== 'clean' ? selectedLUTPreset : undefined,
         colorAdjustments: colorAdjustments,
         transitionType: selectedTransition,
+        velocityTransitionType: selectedVelocityTransition !== 'none' ? selectedVelocityTransition : undefined,
         chromaKey: chromaKeyOptions.enabled ? chromaKeyOptions : undefined,
+        exportMatrix: activeExportMatrix,
+        customSubtitleStyling: customSubtitleStyling,
         duration: Math.min(30, trimEnd - trimStart || duration),
         subtitles: subtitleText
           ? {
@@ -1377,7 +1422,7 @@ export default function ManualStudioPage() {
 
       downloadRenderedBlob(
         outputBlob,
-        `${(project?.title || 'editflow').toLowerCase().replace(/\s+/g, '_')}_${targetAspect}.webm`
+        `${(project?.title || 'editflow').toLowerCase().replace(/\s+/g, '_')}_${targetAspect}_${activeExportMatrix.resolutionTier}_${activeExportMatrix.fps}fps.webm`
       );
       toast.success(`🎉 Video render completed and downloaded (${targetAspect})!`);
     } catch (err: any) {
@@ -1549,6 +1594,14 @@ export default function ManualStudioPage() {
           >
             <Layers className="w-3.5 h-3.5 text-cyan-400" />
             <span className="hidden sm:inline">Batch Queue</span>
+          </button>
+          <button
+            onClick={() => setShowExportMatrixModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-purple-600/20 hover:bg-purple-600/30 text-xs font-semibold text-purple-200 border border-purple-500/40 transition-all flex items-center gap-1.5 shadow-sm"
+            title="Master Export Matrix & Custom Codec / Bitrate Console"
+          >
+            <Film className="w-3.5 h-3.5 text-purple-400" />
+            <span className="hidden sm:inline">Export Matrix</span>
           </button>
           <div className="h-4 w-px bg-white/10 mx-1" />
           <button
@@ -1812,14 +1865,25 @@ export default function ManualStudioPage() {
                   </span>
                 </div>
 
-                {/* AI Keyword Auto-Detect Button */}
-                <button
-                  onClick={handleAutoDetectBRoll}
-                  className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-orange-500/20 via-purple-500/20 to-cyan-500/20 border border-orange-500/40 hover:border-orange-400 text-xs font-semibold text-white flex items-center justify-center gap-2 shadow-sm transition-all"
-                >
-                  <Sparkles className="w-3.5 h-3.5 text-orange-300 animate-pulse" />
-                  <span>Auto-Detect B-Roll from Script</span>
-                </button>
+                {/* AI Keyword Auto-Detect & Auto-Inserter Buttons */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleAutoDetectBRoll}
+                    className="py-2.5 px-3 rounded-xl bg-orange-500/15 border border-orange-500/30 hover:border-orange-400 text-xs font-semibold text-white flex items-center justify-center gap-1.5 shadow-sm transition-all"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-orange-300" />
+                    <span>Detect Cues</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleAutoBrollInserter}
+                    className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-orange-500/30 to-amber-500/30 border border-orange-400/50 hover:border-orange-300 text-xs font-bold text-amber-200 flex items-center justify-center gap-1.5 shadow-sm transition-all"
+                  >
+                    <Flame className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                    <span>Auto-Insert All</span>
+                  </button>
+                </div>
 
                 {/* Suggested B-Roll Placements from AI */}
                 {brollSuggestions.length > 0 && (
@@ -2060,6 +2124,27 @@ export default function ManualStudioPage() {
                   <span className="text-[10px] text-purple-300 font-mono font-semibold">4 Voices</span>
                 </div>
 
+                {/* Voice Persona & Custom Timbre Studio Launch Card */}
+                <div className="p-3 rounded-2xl bg-gradient-to-r from-purple-950/40 to-indigo-950/40 border border-purple-500/30 flex items-center justify-between">
+                  <div className="overflow-hidden pr-2">
+                    <span className="text-[10px] uppercase font-bold text-purple-400 block">Active Persona Timbre</span>
+                    <p className="text-xs font-bold text-white truncate flex items-center gap-1.5">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono font-bold">
+                        {activeVoicePersona.tag}
+                      </span>
+                      <span>{activeVoicePersona.name}</span>
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowVoicePersonaModal(true)}
+                    className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-bold shadow-md shadow-purple-600/30 flex items-center gap-1.5 transition flex-shrink-0"
+                  >
+                    <Sliders className="w-3 h-3" />
+                    <span>Tune Timbre</span>
+                  </button>
+                </div>
+
                 {/* Voice Profile Selector */}
                 <div className="space-y-1.5">
                   <label className="text-[11px] text-slate-400 font-medium block">Select AI Voice Personality</label>
@@ -2266,6 +2351,52 @@ export default function ManualStudioPage() {
                           </div>
                         </div>
                         {selectedTransition === t.id && <Check className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Velocity & Motion Blur Engine Presets */}
+                <div className="space-y-2 pt-2 border-t border-white/[0.06]">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] text-amber-300 font-bold block flex items-center gap-1">
+                      <span>⚡</span> Velocity & Motion Blur Transitions
+                    </label>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono font-bold">
+                      Viral Pacing
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {VELOCITY_TRANSITION_PRESETS.map((vt) => (
+                      <button
+                        key={vt.id}
+                        type="button"
+                        onClick={() => {
+                          if (selectedVelocityTransition === vt.id) {
+                            setSelectedVelocityTransition('none');
+                            toast.info('Cleared velocity transition');
+                          } else {
+                            setSelectedVelocityTransition(vt.id);
+                            toast.success(`Velocity transition set to ${vt.name}`);
+                          }
+                        }}
+                        className={`w-full p-2.5 rounded-xl border text-left transition-all flex items-center justify-between ${
+                          selectedVelocityTransition === vt.id
+                            ? 'bg-amber-500/20 border-amber-400 text-white shadow-md shadow-amber-900/20'
+                            : 'bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">{vt.icon}</span>
+                          <div>
+                            <p className="text-xs font-bold text-white flex items-center gap-1.5">
+                              <span>{vt.name}</span>
+                              <span className="text-[9px] font-mono text-amber-400">{vt.defaultDuration}s</span>
+                            </p>
+                            <p className="text-[9px] text-slate-400 leading-tight">{vt.description}</p>
+                          </div>
+                        </div>
+                        {selectedVelocityTransition === vt.id && <Check className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />}
                       </button>
                     ))}
                   </div>
@@ -3012,31 +3143,117 @@ export default function ManualStudioPage() {
                   <span>{isTranscribing ? 'Transcribing...' : 'Auto-Transcribe with AI (Whisper)'}</span>
                 </button>
 
-                {/* Hormozi Style Preset Picker */}
+                {/* Advanced Subtitle Styling Presets */}
                 <div className="space-y-2">
-                  <label className="text-[11px] text-slate-400 font-medium block">Animated Subtitle Style</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {[
-                      { id: 'hormozi', name: 'Hormozi / Beast', badge: '🔥 Bouncy' },
-                      { id: 'neon', name: 'Neon Glow', badge: '✨ Cyber' },
-                      { id: 'minimal', name: 'Minimal Clean', badge: '⚪ Subtle' },
-                    ].map((preset) => (
-                      <button
-                        key={preset.id}
-                        onClick={() => {
-                          setSubtitleStyle(preset.id as any);
-                          toast.success(`Activated ${preset.name} subtitle style`);
-                        }}
-                        className={`p-2 rounded-xl border text-center transition-all ${
-                          subtitleStyle === preset.id
-                            ? 'bg-amber-500/20 border-amber-400 text-white font-bold shadow-md shadow-amber-900/20'
-                            : 'bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-white'
-                        }`}
-                      >
-                        <span className="text-[10px] font-bold block">{preset.name}</span>
-                        <span className="text-[8px] text-amber-400/90 block mt-0.5">{preset.badge}</span>
-                      </button>
-                    ))}
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] text-amber-300 font-bold block">
+                      Viral Typography Presets ({SUBTITLE_DESIGN_PRESETS.length})
+                    </label>
+                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold">
+                      Custom Studio
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {SUBTITLE_DESIGN_PRESETS.map((preset) => {
+                      const isSelected = customSubtitleStyling.presetId === preset.id;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => {
+                            setCustomSubtitleStyling({
+                              ...preset.styling,
+                              fontSize: subtitleSize,
+                              position: subtitlePosition,
+                            });
+                            if (preset.id === 'cyberpunk-neon') setSubtitleStyle('neon');
+                            else if (preset.id === 'monochrome-bold') setSubtitleStyle('minimal');
+                            else setSubtitleStyle('hormozi');
+                            toast.success(`Applied ${preset.name} styling preset!`);
+                          }}
+                          className={`p-2 rounded-xl border text-left transition-all relative ${
+                            isSelected
+                              ? 'bg-amber-500/20 border-amber-400 text-white font-bold shadow-md shadow-amber-900/20 ring-1 ring-amber-400/60'
+                              : 'bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-white hover:bg-white/[0.04]'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-0.5">
+                            <span className="text-base">{preset.icon}</span>
+                            {isSelected && <Check className="w-3 h-3 text-amber-400 stroke-[3]" />}
+                          </div>
+                          <span className="text-[11px] font-bold text-white block truncate">{preset.name}</span>
+                          <span className="text-[8px] text-slate-400 block line-clamp-1 mt-0.5">{preset.description}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Granular Typography Controls */}
+                <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06] space-y-3">
+                  <span className="text-[10px] font-bold text-slate-300 uppercase tracking-wider block">
+                    Typography Micro-Tuning
+                  </span>
+
+                  {/* Font Family */}
+                  <div className="space-y-1">
+                    <label className="text-[10px] text-slate-400 block">Font Family</label>
+                    <select
+                      value={customSubtitleStyling.fontFamily}
+                      onChange={(e) =>
+                        setCustomSubtitleStyling((prev) => ({ ...prev, fontFamily: e.target.value }))
+                      }
+                      className="w-full py-1.5 px-2 rounded-lg bg-black/50 border border-white/10 text-xs text-white focus:outline-none focus:border-amber-400"
+                    >
+                      {AVAILABLE_FONTS.map((f) => (
+                        <option key={f.value} value={f.value} className="bg-neutral-900 text-white">
+                          {f.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Stroke Width Slider */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-slate-400">Outline Stroke Width</span>
+                      <span className="text-amber-400 font-mono font-bold">{customSubtitleStyling.strokeWidth}px</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={6}
+                      step={1}
+                      value={customSubtitleStyling.strokeWidth}
+                      onChange={(e) =>
+                        setCustomSubtitleStyling((prev) => ({
+                          ...prev,
+                          strokeWidth: parseInt(e.target.value),
+                        }))
+                      }
+                      className="w-full accent-amber-400 h-1.5"
+                    />
+                  </div>
+
+                  {/* Emoji Bounce Toggle & Casing */}
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-[11px] text-slate-300">Emoji Bounce Effect</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCustomSubtitleStyling((prev) => ({
+                          ...prev,
+                          showEmojis: !prev.showEmojis,
+                        }))
+                      }
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
+                        customSubtitleStyling.showEmojis
+                          ? 'bg-amber-500 text-black shadow-sm'
+                          : 'bg-white/10 text-slate-400'
+                      }`}
+                    >
+                      {customSubtitleStyling.showEmojis ? 'BOUNCING ON' : 'OFF'}
+                    </button>
                   </div>
                 </div>
 
@@ -3060,7 +3277,11 @@ export default function ManualStudioPage() {
                     min={16}
                     max={48}
                     value={subtitleSize}
-                    onChange={(e) => setSubtitleSize(parseInt(e.target.value))}
+                    onChange={(e) => {
+                      const sz = parseInt(e.target.value);
+                      setSubtitleSize(sz);
+                      setCustomSubtitleStyling((prev) => ({ ...prev, fontSize: sz }));
+                    }}
                     className="w-full accent-cyan-400"
                   />
                 </div>
@@ -3071,10 +3292,13 @@ export default function ManualStudioPage() {
                     {['top', 'center', 'bottom'].map((pos) => (
                       <button
                         key={pos}
-                        onClick={() => setSubtitlePosition(pos as any)}
+                        onClick={() => {
+                          setSubtitlePosition(pos as any);
+                          setCustomSubtitleStyling((prev) => ({ ...prev, position: pos as any }));
+                        }}
                         className={`py-1.5 rounded-lg text-xs font-medium capitalize border ${
                           subtitlePosition === pos
-                            ? 'bg-purple-600/30 border-purple-500 text-white'
+                            ? 'bg-purple-600/30 border-purple-500 text-white font-bold'
                             : 'border-white/10 text-slate-400'
                         }`}
                       >
@@ -4242,6 +4466,7 @@ export default function ManualStudioPage() {
                   stylePreset={subtitleStyle}
                   fontSize={subtitleSize}
                   position={subtitlePosition}
+                  customStyling={customSubtitleStyling}
                 />
               )}
 
@@ -4800,6 +5025,30 @@ export default function ManualStudioPage() {
         projectTitle={project?.title || 'Viral Video'}
         onRenderAspect={async (aspect) => {
           await handleInBrowserRender(aspect);
+        }}
+      />
+
+      {/* AI Voice Persona & Custom Timbre Studio Modal */}
+      <VoicePersonaModal
+        isOpen={showVoicePersonaModal}
+        onClose={() => setShowVoicePersonaModal(false)}
+        sampleText={voiceoverScript || subtitleText}
+        onApplyPersona={(persona) => {
+          setActiveVoicePersona(persona);
+          toast.success(`Applied voice timbre: ${persona.name}`);
+        }}
+      />
+
+      {/* Master Export Matrix & Custom Codec / Bitrate Console Modal */}
+      <ExportMatrixModal
+        isOpen={showExportMatrixModal}
+        onClose={() => setShowExportMatrixModal(false)}
+        aspectRatio={aspectRatio}
+        totalDuration={duration}
+        onConfirmExport={(settings) => {
+          setExportMatrixSettings(settings);
+          toast.success(`Rendering Master in ${settings.resolutionTier.toUpperCase()} @ ${settings.fps} FPS...`);
+          handleInBrowserRender(aspectRatio, settings);
         }}
       />
     </div>

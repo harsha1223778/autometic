@@ -13,6 +13,9 @@ import { calculateKenBurnsTransform } from './kenBurns';
 import { renderSplitScreenComposite } from './splitScreen';
 import { calculateCameraShakeOffset, applyCameraShakeToCanvas } from './motionBlur';
 import { BrandKit, calculateLogoPlacement } from './brandKit';
+import { applyVelocityTransition } from './velocityTransitions';
+import { SubtitleStyling } from './subtitleDesigner';
+import { ExportMatrixSettings, resolveMatrixDimensions } from './exportMatrix';
 
 export interface RenderOptions {
   videoElement: HTMLVideoElement | null;
@@ -55,6 +58,9 @@ export interface RenderOptions {
   callouts?: ActiveCallout[];
   musicUrl?: string | null;
   musicVolume?: number;
+  exportMatrix?: ExportMatrixSettings;
+  customSubtitleStyling?: SubtitleStyling;
+  velocityTransitionType?: string;
   onProgress?: (progressPct: number, stage: string) => void;
 }
 
@@ -76,7 +82,11 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
   // Determine Canvas Dimensions
   let width = 1280;
   let height = 720;
-  if (aspectRatio === '9:16') {
+  if (options.exportMatrix) {
+    const matrixDims = resolveMatrixDimensions(options.exportMatrix.resolutionTier, aspectRatio);
+    width = options.exportMatrix.customWidth || matrixDims.width;
+    height = options.exportMatrix.customHeight || matrixDims.height;
+  } else if (aspectRatio === '9:16') {
     width = 720;
     height = 1280;
   } else if (aspectRatio === '1:1') {
@@ -215,8 +225,13 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
     console.warn('AudioContext setup skipped:', err);
   }
 
+  // Determine target FPS and Bitrates
+  const targetFps = options.exportMatrix?.fps || 30;
+  const videoBitrate = options.exportMatrix?.videoBitrate || 4500000;
+  const audioBitrate = options.exportMatrix?.audioBitrate || 192000;
+
   // Create combined canvas stream
-  const canvasStream = canvas.captureStream(30);
+  const canvasStream = canvas.captureStream(targetFps);
   if (audioDestination && audioDestination.stream.getAudioTracks().length > 0) {
     const audioTrack = audioDestination.stream.getAudioTracks()[0];
     canvasStream.addTrack(audioTrack);
@@ -240,7 +255,8 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
   const recordedChunks: Blob[] = [];
   const recorder = new MediaRecorder(canvasStream, {
     mimeType: selectedMimeType,
-    videoBitsPerSecond: 4500000,
+    videoBitsPerSecond: videoBitrate,
+    audioBitsPerSecond: audioBitrate,
   });
 
   recorder.ondataavailable = (event) => {
@@ -250,7 +266,7 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
   };
 
   const renderDuration = Math.min(30, Math.max(3, duration));
-  const fps = 30;
+  const fps = targetFps;
   const totalFrames = Math.floor(renderDuration * fps);
   let currentFrame = 0;
 
@@ -402,29 +418,68 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
         }
       }
 
-      // 4. Handle Visual Transitions
-      if (options.transitionType && options.transitionType !== 'none') {
-        const transDur = 0.6;
+      // 4. Handle Visual Transitions & Velocity FX
+      const activeTransType = options.velocityTransitionType || options.transitionType;
+      if (activeTransType && activeTransType !== 'none') {
+        const transDur = 0.5;
         const transMid = duration / 2;
         if (currentTime >= transMid - transDur / 2 && currentTime <= transMid + transDur / 2) {
           const transProg = (currentTime - (transMid - transDur / 2)) / transDur;
-          applyCanvasTransitionFX(ctx, options.transitionType, transProg, width, height);
+          const isVelocity = ['crash-zoom-in', 'crash-zoom-out', 'whip-blur-left', 'whip-blur-right', 'glitch-shake', 'hyper-spin'].includes(activeTransType);
+          if (isVelocity) {
+            applyVelocityTransition(ctx, activeTransType, transProg, width, height);
+          } else {
+            applyCanvasTransitionFX(ctx, activeTransType, transProg, width, height);
+          }
         }
       }
 
       // 5. Burn in Burnt-In Subtitles / Karaoke Text
       if (subtitles?.text) {
         ctx.save();
-        const fSize = subtitles.fontSize || (aspectRatio === '9:16' ? 36 : 28);
-        ctx.font = `900 ${fSize}px sans-serif`;
+        const custom = options.customSubtitleStyling;
+        const fSize = custom?.fontSize || subtitles.fontSize || (aspectRatio === '9:16' ? 36 : 28);
+        const fFamily = custom?.fontFamily || 'sans-serif';
+        const fWeight = custom?.fontWeight || '900';
+        ctx.font = `${fWeight} ${fSize}px ${fFamily}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
+        const subPos = custom?.position || subtitles.position || 'bottom';
         let subY = height - 80;
-        if (subtitles.position === 'top') subY = 90;
-        if (subtitles.position === 'center') subY = height / 2;
+        if (subPos === 'top') subY = 90;
+        if (subPos === 'center') subY = height / 2;
 
-        if (subtitles.style === 'hormozi') {
+        if (custom) {
+          let text = subtitles.text;
+          if (custom.textTransform === 'uppercase') text = text.toUpperCase();
+          const metrics = ctx.measureText(text);
+          const boxPadding = 16;
+          const boxW = metrics.width + boxPadding * 2;
+          const boxH = fSize + 16;
+
+          if (custom.highlightBgColor && custom.highlightBgColor !== 'transparent') {
+            ctx.fillStyle = custom.highlightBgColor;
+            ctx.beginPath();
+            const radius = custom.boxRounded === 'full' ? boxH / 2 : custom.boxRounded === 'none' ? 0 : 8;
+            ctx.roundRect(width / 2 - boxW / 2, subY - boxH / 2, boxW, boxH, radius);
+            ctx.fill();
+          }
+
+          if (custom.shadowBlur > 0) {
+            ctx.shadowColor = custom.shadowColor || 'rgba(0,0,0,0.8)';
+            ctx.shadowBlur = custom.shadowBlur;
+          }
+
+          if (custom.strokeWidth > 0 && custom.strokeColor) {
+            ctx.lineWidth = custom.strokeWidth;
+            ctx.strokeStyle = custom.strokeColor;
+            ctx.strokeText(text, width / 2, subY);
+          }
+
+          ctx.fillStyle = custom.highlightTextColor || custom.textColor || '#FFFFFF';
+          ctx.fillText(text, width / 2, subY);
+        } else if (subtitles.style === 'hormozi') {
           // Yellow bouncing box with black text
           const text = subtitles.text.toUpperCase();
           const metrics = ctx.measureText(text);
