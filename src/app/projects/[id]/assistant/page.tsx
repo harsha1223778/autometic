@@ -110,12 +110,12 @@ export default function AIAssistantPage() {
   });
 
   const suggestedPrompts = [
-    'Make this vlog look professional.',
+    'Add Alex Hormozi animated bouncing subtitles with emojis.',
+    'Reframe this video for TikTok & Reels 9:16 vertical.',
+    'Auto-detect keywords and insert stock B-roll cutaways.',
+    'Remove dead air silences and normalize voice audio.',
     'Overlay images and insert B-roll cutaways.',
-    'Remove silent parts and add subtitles.',
-    'Turn this into a 30-second Instagram Reel.',
     'Add calm background music and clean the audio.',
-    'Create short highlights from this podcast.',
   ];
 
   useEffect(() => {
