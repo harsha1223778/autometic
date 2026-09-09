@@ -16,12 +16,14 @@ import { BrandKit, calculateLogoPlacement } from './brandKit';
 import { applyVelocityTransition } from './velocityTransitions';
 import { SubtitleStyling } from './subtitleDesigner';
 import { ExportMatrixSettings, resolveMatrixDimensions } from './exportMatrix';
+import { applyCameraAngleTransform } from './multiCamDirector';
 
 export interface RenderOptions {
   videoElement: HTMLVideoElement | null;
   imageSrc?: string | null;
   secondaryMediaSrc?: string | null;
   splitScreenLayout?: 'none' | 'top-bottom' | 'side-by-side' | 'pip-circle' | 'pip-rect';
+  multiCamAngleId?: string;
   cameraShake?: {
     type: 'quick-jolt' | 'bass-drop-impact' | 'earthquake-rumble' | 'handheld-micro';
     startTime: number;
@@ -311,6 +313,11 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
         const dy = (height - dh) / 2;
         ctx.drawImage(loadedBaseImage, dx, dy, dw, dh);
       } else if (videoElement) {
+        ctx.save();
+        if (options.multiCamAngleId && options.multiCamAngleId !== 'angle-wide') {
+          applyCameraAngleTransform(ctx, options.multiCamAngleId, width, height);
+        }
+
         // Render base video
         if (aspectRatio === '9:16' && reframeMode === 'blurred-letterbox') {
           // Blurred ambient background
@@ -337,6 +344,7 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
           // Standard fit
           ctx.drawImage(videoElement, 0, 0, width, height);
         }
+        ctx.restore();
       }
 
       // 1b. Apply Chroma Key Background Transparency

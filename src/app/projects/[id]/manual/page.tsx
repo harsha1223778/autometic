@@ -61,6 +61,7 @@ import {
   Globe,
   Flag,
   Shield,
+  Calendar,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import KaraokeSubtitles from '@/components/studio/KaraokeSubtitles';
@@ -136,6 +137,13 @@ import { VELOCITY_TRANSITION_PRESETS, VelocityTransitionPreset } from '@/lib/vel
 import { SubtitleStyling, SUBTITLE_DESIGN_PRESETS, DEFAULT_SUBTITLE_STYLING, AVAILABLE_FONTS } from '@/lib/subtitleDesigner';
 import { ExportMatrixSettings, EXPORT_MATRIX_PRESETS, DEFAULT_EXPORT_SETTINGS } from '@/lib/exportMatrix';
 import ExportMatrixModal from '@/components/studio/ExportMatrixModal';
+import { CAMERA_ANGLES, CameraAngle, generateAutoMultiCamCues } from '@/lib/multiCamDirector';
+import { SOUNDSCAPE_PRESETS, SoundscapePreset, startSoundscape, stopSoundscape, setSoundscapeVolume, setSoundscapeDucking } from '@/lib/soundscapeEngine';
+import { HookVariant, generateHookVariants } from '@/lib/hookTester';
+import HookTesterModal from '@/components/studio/HookTesterModal';
+import { EditorialPin, loadEditorialPins, saveEditorialPins } from '@/lib/editorialReview';
+import EditorialReviewModal from '@/components/studio/EditorialReviewModal';
+import ChannelSchedulerModal from '@/components/studio/ChannelSchedulerModal';
 
 const isImageMedia = (url?: string) => {
   if (!url) return false;
@@ -174,7 +182,7 @@ export default function ManualStudioPage() {
   const [duration, setDuration] = useState(30);
 
   // Studio Tools & Properties State
-  const [activeTab, setActiveTab] = useState<'media' | 'stock' | 'sequence' | 'voice' | 'script' | 'sfx' | 'transitions' | 'callouts' | 'stickers' | 'retention' | 'speed' | 'chroma' | 'coach' | 'seo' | 'reframe' | 'trim' | 'audio' | 'subtitles' | 'filters' | 'history' | 'storyboard' | 'splitscreen' | 'shake' | 'highlights' | 'translate'>('media');
+  const [activeTab, setActiveTab] = useState<'media' | 'stock' | 'sequence' | 'multicam' | 'voice' | 'script' | 'sfx' | 'transitions' | 'callouts' | 'stickers' | 'retention' | 'speed' | 'chroma' | 'coach' | 'seo' | 'reframe' | 'trim' | 'audio' | 'subtitles' | 'filters' | 'history' | 'storyboard' | 'splitscreen' | 'shake' | 'highlights' | 'translate'>('media');
   const [mediaAssets, setMediaAssets] = useState<MediaAsset[]>([]);
   const [selectedOverlayPosition, setSelectedOverlayPosition] = useState<'top-right' | 'center' | 'lower-third'>('top-right');
   const [overlayDuration, setOverlayDuration] = useState(4.0);
@@ -330,6 +338,16 @@ export default function ManualStudioPage() {
   const [customSubtitleStyling, setCustomSubtitleStyling] = useState<SubtitleStyling>(DEFAULT_SUBTITLE_STYLING);
   const [showExportMatrixModal, setShowExportMatrixModal] = useState<boolean>(false);
   const [exportMatrixSettings, setExportMatrixSettings] = useState<ExportMatrixSettings>(DEFAULT_EXPORT_SETTINGS);
+
+  // 31. Phase 6 Autonomous Distribution & Collaborative Studio States
+  const [selectedCameraAngle, setSelectedCameraAngle] = useState<string>('angle-wide');
+  const [activeSoundscape, setActiveSoundscape] = useState<string | null>(null);
+  const [soundscapeVolume, setSoundscapeVolumeState] = useState<number>(25);
+  const [isPlayingSoundscape, setIsPlayingSoundscape] = useState<boolean>(false);
+  const [showHookTesterModal, setShowHookTesterModal] = useState<boolean>(false);
+  const [showEditorialReviewModal, setShowEditorialReviewModal] = useState<boolean>(false);
+  const [editorialPins, setEditorialPins] = useState<EditorialPin[]>(() => loadEditorialPins(projectId || 'default'));
+  const [showChannelSchedulerModal, setShowChannelSchedulerModal] = useState<boolean>(false);
 
   // Trim & Audio State
   const [trimStart, setTrimStart] = useState(0);
@@ -1390,6 +1408,7 @@ export default function ManualStudioPage() {
         splitScreenLayout: splitScreenLayout !== 'none' ? splitScreenLayout : undefined,
         cameraShake: activeCameraShake ? activeCameraShake : undefined,
         brandKit: brandKit.enabled ? brandKit : undefined,
+        multiCamAngleId: selectedCameraAngle,
         aspectRatio: targetAspect,
         reframeMode,
         filter: selectedFilter,
@@ -1603,6 +1622,30 @@ export default function ManualStudioPage() {
             <Film className="w-3.5 h-3.5 text-purple-400" />
             <span className="hidden sm:inline">Export Matrix</span>
           </button>
+          <button
+            onClick={() => setShowHookTesterModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-xs font-semibold text-amber-300 border border-amber-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+            title="Viral Hook & Title A/B Testing Simulator"
+          >
+            <TrendingUp className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">Hook A/B</span>
+          </button>
+          <button
+            onClick={() => setShowEditorialReviewModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-cyan-500/15 hover:bg-cyan-500/25 text-xs font-semibold text-cyan-300 border border-cyan-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+            title="Real-Time Collaborative Editorial Review Pins"
+          >
+            <BotMessageSquare className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden sm:inline">Review ({editorialPins.length})</span>
+          </button>
+          <button
+            onClick={() => setShowChannelSchedulerModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-xs font-semibold text-emerald-300 border border-emerald-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+            title="Autonomous Multi-Channel Scheduled Publishing"
+          >
+            <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="hidden sm:inline">Schedule</span>
+          </button>
           <div className="h-4 w-px bg-white/10 mx-1" />
           <button
             onClick={handleSaveDraft}
@@ -1652,6 +1695,7 @@ export default function ManualStudioPage() {
             {[
               { id: 'media', label: 'Media', icon: ImageIcon },
               { id: 'sequence', label: 'Multi-Clip', icon: Layers },
+              { id: 'multicam', label: 'Multi-Cam', icon: VideoIcon },
               { id: 'stock', label: 'B-Roll', icon: Flame },
               { id: 'stickers', label: 'Stickers', icon: Smile },
               { id: 'retention', label: 'Retention', icon: Activity },
@@ -1852,6 +1896,115 @@ export default function ManualStudioPage() {
                 onSelectClip={(clip) => setActiveSequenceClipId(clip.id)}
                 activeClipId={activeSequenceClipId}
               />
+            )}
+
+            {activeTab === 'multicam' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <VideoIcon className="w-3.5 h-3.5 text-cyan-400" /> Multi-Camera Director
+                  </h4>
+                  <span className="text-[10px] text-purple-300 font-mono font-semibold">
+                    {CAMERA_ANGLES.length} Angles
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  Switch between wide master and automated podcaster speaker angles with speech-cadence tracking.
+                </p>
+
+                {/* Auto-Direct Angle Cuts Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const cues = generateAutoMultiCamCues(duration, 5.0);
+                    cues.forEach((cue) => {
+                      const angle = CAMERA_ANGLES.find((a) => a.id === cue.angleId);
+                      addOperation('multicam_cut', `Camera Cut: ${angle?.name || cue.angleId}`, {
+                        angleId: cue.angleId,
+                        startTime: cue.startTime,
+                        duration: cue.duration,
+                        speaker: cue.speaker,
+                      });
+                    });
+                    toast.success(`🎬 Auto-directed ${cues.length} camera angle cuts across timeline!`);
+                  }}
+                  className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-purple-600/30 via-cyan-600/30 to-blue-600/30 border border-cyan-500/40 hover:border-cyan-400 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-cyan-300 animate-pulse" />
+                  <span>Auto-Direct Podcaster Cuts ({duration.toFixed(0)}s)</span>
+                </button>
+
+                {/* Camera Angle Cards */}
+                <div className="space-y-2">
+                  <label className="text-[11px] text-slate-400 font-medium block">Active Camera Angle</label>
+                  <div className="space-y-1.5">
+                    {CAMERA_ANGLES.map((ang) => {
+                      const isSelected = selectedCameraAngle === ang.id;
+                      return (
+                        <button
+                          key={ang.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedCameraAngle(ang.id);
+                            addOperation('multicam_switch', `Switch Angle: ${ang.name}`, {
+                              angleId: ang.id,
+                              time: currentTime.toFixed(1),
+                            });
+                            toast.success(`Switched camera to ${ang.name}`);
+                          }}
+                          className={`w-full p-2.5 rounded-xl border text-left transition-all flex items-center justify-between ${
+                            isSelected
+                              ? 'bg-cyan-500/20 border-cyan-400 text-white shadow-md shadow-cyan-950/40 ring-1 ring-cyan-500/40'
+                              : 'bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-white hover:bg-white/[0.04]'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-xl">{ang.icon}</span>
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-bold text-xs text-white">{ang.name}</span>
+                                <span className="text-[9px] font-mono px-1 rounded bg-neutral-800 text-cyan-300 font-bold">
+                                  {ang.badge}
+                                </span>
+                              </div>
+                              <p className="text-[9px] text-slate-400 line-clamp-1 leading-tight">{ang.description}</p>
+                            </div>
+                          </div>
+                          {isSelected && <Check className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Active MultiCam Operations */}
+                {operations.some((op) => op.type === 'multicam_cut' || op.type === 'multicam_switch') && (
+                  <div className="space-y-2 pt-2 border-t border-white/[0.08]">
+                    <span className="text-[10px] font-bold text-cyan-300 uppercase tracking-wider block">
+                      Timeline Angle Cuts ({operations.filter((op) => op.type === 'multicam_cut' || op.type === 'multicam_switch').length})
+                    </span>
+                    <div className="space-y-1 max-h-36 overflow-y-auto pr-1 font-mono text-[10px]">
+                      {operations
+                        .filter((op) => op.type === 'multicam_cut' || op.type === 'multicam_switch')
+                        .map((op) => (
+                          <div
+                            key={op.id}
+                            className="p-2 rounded-lg bg-black/40 border border-white/5 flex items-center justify-between text-slate-300"
+                          >
+                            <span className="truncate max-w-[190px]">{op.name}</span>
+                            <button
+                              onClick={() => handleRemoveOverlayOp(op.id)}
+                              className="text-slate-500 hover:text-rose-400"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
 
             {activeTab === 'stock' && (
@@ -3110,6 +3263,68 @@ export default function ManualStudioPage() {
                               className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all ${
                                 isPlaying
                                   ? 'bg-purple-600 text-white animate-pulse'
+                                  : 'bg-white/10 hover:bg-white/20 text-white'
+                              }`}
+                            >
+                              {isPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
+                              <span>{isPlaying ? 'Stop' : 'Play'}</span>
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* AI Environmental Foley Soundscapes */}
+                  <div className="p-3.5 rounded-2xl bg-emerald-950/20 border border-emerald-500/30 space-y-3 pt-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                        <Volume2 className="w-3.5 h-3.5 text-emerald-400" /> Procedural Soundscapes
+                      </span>
+                      <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300">
+                        Acoustic Ambience
+                      </span>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      {SOUNDSCAPE_PRESETS.map((sc) => {
+                        const isPlaying = activeSoundscape === sc.id && isPlayingSoundscape;
+                        return (
+                          <div
+                            key={sc.id}
+                            className={`p-2 rounded-xl border text-xs transition-all flex items-center justify-between ${
+                              isPlaying
+                                ? 'bg-emerald-600/20 border-emerald-500 text-white shadow-md'
+                                : 'bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 overflow-hidden">
+                              <span className="text-base flex-shrink-0">{sc.icon}</span>
+                              <div className="overflow-hidden">
+                                <p className="text-[11px] font-bold text-white truncate">{sc.name}</p>
+                                <span className="text-[9px] text-emerald-400 font-mono">{sc.tag}</span>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (isPlaying) {
+                                  stopSoundscape();
+                                  setIsPlayingSoundscape(false);
+                                  setActiveSoundscape(null);
+                                  toast.info('Stopped ambient soundscape');
+                                } else {
+                                  setActiveSoundscape(sc.id);
+                                  startSoundscape(sc.id, soundscapeVolume / 100);
+                                  setIsPlayingSoundscape(true);
+                                  addOperation('soundscape_layer', `Soundscape: ${sc.name}`, { presetId: sc.id });
+                                  toast.success(`Active soundscape: ${sc.name}`);
+                                }
+                              }}
+                              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 transition-all ${
+                                isPlaying
+                                  ? 'bg-emerald-600 text-white animate-pulse'
                                   : 'bg-white/10 hover:bg-white/20 text-white'
                               }`}
                             >
@@ -5050,6 +5265,55 @@ export default function ManualStudioPage() {
           toast.success(`Rendering Master in ${settings.resolutionTier.toUpperCase()} @ ${settings.fps} FPS...`);
           handleInBrowserRender(aspectRatio, settings);
         }}
+      />
+
+      {/* Viral Hook & Title A/B Testing Simulator Modal */}
+      <HookTesterModal
+        isOpen={showHookTesterModal}
+        onClose={() => setShowHookTesterModal(false)}
+        defaultTopic={project?.title || 'AI Video Production'}
+        onApplyHook={(variant) => {
+          setSubtitleText(variant.spokenHook);
+          toast.success(`Applied "${variant.name}" to subtitles & script!`);
+        }}
+      />
+
+      {/* Real-Time Collaborative Editorial Review Modal */}
+      <EditorialReviewModal
+        isOpen={showEditorialReviewModal}
+        onClose={() => setShowEditorialReviewModal(false)}
+        currentTime={currentTime}
+        pins={editorialPins}
+        onAddPin={(newPin) => {
+          const updated = [newPin, ...editorialPins];
+          setEditorialPins(updated);
+          saveEditorialPins(projectId || 'default', updated);
+        }}
+        onToggleStatus={(pinId) => {
+          const updated = editorialPins.map((p) =>
+            p.id === pinId ? { ...p, status: p.status === 'resolved' ? ('pending' as const) : ('resolved' as const) } : p
+          );
+          setEditorialPins(updated);
+          saveEditorialPins(projectId || 'default', updated);
+        }}
+        onDeletePin={(pinId) => {
+          const updated = editorialPins.filter((p) => p.id !== pinId);
+          setEditorialPins(updated);
+          saveEditorialPins(projectId || 'default', updated);
+        }}
+        onSeekToTime={(time) => {
+          if (videoRef.current) videoRef.current.currentTime = time;
+          setCurrentTime(time);
+        }}
+      />
+
+      {/* Autonomous Multi-Channel Scheduled Publishing Modal */}
+      <ChannelSchedulerModal
+        isOpen={showChannelSchedulerModal}
+        onClose={() => setShowChannelSchedulerModal(false)}
+        projectId={projectId || 'p-1'}
+        projectTitle={project?.title || 'Viral Video'}
+        transcriptSnippet={subtitleText || project?.description || ''}
       />
     </div>
   );
