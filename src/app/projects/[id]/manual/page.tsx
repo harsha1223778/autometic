@@ -62,6 +62,8 @@ import {
   Flag,
   Shield,
   Calendar,
+  Tag,
+  ShoppingBag,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import KaraokeSubtitles from '@/components/studio/KaraokeSubtitles';
@@ -155,6 +157,13 @@ import VoiceDubbingModal from '@/components/studio/VoiceDubbingModal';
 import { DubbingProjectReport } from '@/lib/voiceDubber';
 import { evaluatePacingDensity, PacingDensityReport } from '@/lib/pacingEqualizer';
 import AlgorithmSimulatorModal from '@/components/studio/AlgorithmSimulatorModal';
+import { VideoHotspotItem, SAMPLE_HOTSPOTS, getActiveHotspots } from '@/lib/videoHotspots';
+import HotspotsStudioModal from '@/components/studio/HotspotsStudioModal';
+import { VOICE_TIMBRE_PROFILES, VoiceTimbreProfileId, calculatePitchPlaybackRate } from '@/lib/voiceCloner';
+import { HarmonizerSettings, HarmonizerPreset } from '@/lib/colorHarmonizer';
+import { HookVariant as ShortsHookVariant } from '@/lib/shortsRepurposer';
+import RepurposerModal from '@/components/studio/RepurposerModal';
+import { VocalEnhancerSettings, DEFAULT_VOCAL_ENHANCER } from '@/lib/vocalDeClicker';
 
 const isImageMedia = (url?: string) => {
   if (!url) return false;
@@ -375,6 +384,22 @@ export default function ManualStudioPage() {
   const [showVoiceDubbingModal, setShowVoiceDubbingModal] = useState<boolean>(false);
   const [pacingReport, setPacingReport] = useState<PacingDensityReport | null>(null);
   const [showAlgorithmModal, setShowAlgorithmModal] = useState<boolean>(false);
+
+  // 34. Phase 9 Interactive Commerce, Audio DSP & Multi-Hook States
+  const [studioHotspots, setStudioHotspots] = useState<VideoHotspotItem[]>(SAMPLE_HOTSPOTS);
+  const [showHotspotsModal, setShowHotspotsModal] = useState<boolean>(false);
+  const [selectedTimbreProfileId, setSelectedTimbreProfileId] = useState<VoiceTimbreProfileId>('warm-podcaster');
+  const [voicePitchSemitones, setVoicePitchSemitones] = useState<number>(0);
+  const [harmonizerSettings, setHarmonizerSettings] = useState<HarmonizerSettings>({
+    enabled: true,
+    preset: 'auto-match',
+    intensity: 0.85,
+    matchExposure: true,
+    matchTemperature: true,
+  });
+  const [showRepurposerModal, setShowRepurposerModal] = useState<boolean>(false);
+  const [vocalEnhancerSettings, setVocalEnhancerSettings] = useState<VocalEnhancerSettings>(DEFAULT_VOCAL_ENHANCER);
+  const [copiedStudioCoupon, setCopiedStudioCoupon] = useState<string | null>(null);
 
   // Trim & Audio State
   const [trimStart, setTrimStart] = useState(0);
@@ -1519,6 +1544,7 @@ export default function ManualStudioPage() {
         filter: selectedFilter,
         colorLUT: selectedLUTPreset !== 'clean' ? selectedLUTPreset : undefined,
         colorAdjustments: colorAdjustments,
+        colorHarmonizer: harmonizerSettings,
         transitionType: selectedTransition,
         velocityTransitionType: selectedVelocityTransition !== 'none' ? selectedVelocityTransition : undefined,
         chromaKey: chromaKeyOptions.enabled ? chromaKeyOptions : undefined,
@@ -1786,6 +1812,27 @@ export default function ManualStudioPage() {
           >
             <TrendingUp className="w-3.5 h-3.5 text-pink-400" />
             <span className="hidden sm:inline">Algorithms</span>
+          </button>
+          <button
+            onClick={() => setShowHotspotsModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-xs font-semibold text-emerald-300 border border-emerald-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+            title="Interactive Shoppable Product Hotspots & In-Video CTAs"
+          >
+            <Tag className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="hidden sm:inline">Hotspots</span>
+            {studioHotspots.length > 0 && (
+              <span className="w-4 h-4 rounded-full bg-emerald-500/30 text-[10px] font-mono flex items-center justify-center text-emerald-200">
+                {studioHotspots.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setShowRepurposerModal(true)}
+            className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-rose-500/20 to-amber-500/20 hover:from-rose-500/30 hover:to-amber-500/30 text-xs font-semibold text-rose-300 border border-rose-500/30 transition-all flex items-center gap-1.5 shadow-sm"
+            title="Autonomous Multi-Hook Repurposing Engine & Shorts Variant Generator"
+          >
+            <Scissors className="w-3.5 h-3.5 text-rose-400" />
+            <span className="hidden sm:inline">Repurpose</span>
           </button>
           <div className="h-4 w-px bg-white/10 mx-1" />
           <button
@@ -2539,6 +2586,65 @@ export default function ManualStudioPage() {
                     <Sparkles className="w-3.5 h-3.5 text-cyan-300" />
                     <span>Add to Timeline</span>
                   </button>
+                </div>
+
+                {/* AI Voice Timbre Re-Synthesizer & Pitch Envelope */}
+                <div className="p-3.5 rounded-2xl bg-indigo-950/25 border border-indigo-500/30 space-y-3 pt-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-400" /> Voice Timbre Re-Synthesis
+                    </span>
+                    <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-mono">
+                      DSP ENGINE
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 leading-snug">
+                    Acoustic formant reshaping and pitch shifting for hyper-realistic cloned voice aesthetics.
+                  </p>
+                  <div className="grid grid-cols-1 gap-1.5">
+                    {VOICE_TIMBRE_PROFILES.map((profile) => (
+                      <button
+                        key={profile.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedTimbreProfileId(profile.id);
+                          toast.success(`Active Timbre: ${profile.name}`);
+                        }}
+                        className={`p-2 rounded-xl border text-xs text-left transition-all ${
+                          selectedTimbreProfileId === profile.id
+                            ? 'bg-indigo-600/30 border-indigo-400 text-white shadow-sm'
+                            : 'bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        <div className="flex justify-between items-center mb-0.5">
+                          <span className="font-bold text-white text-[11px]">{profile.name}</span>
+                          <span className="text-[9px] font-mono text-indigo-300 bg-indigo-500/10 px-1.5 py-0.5 rounded">
+                            {profile.clarityBoostDb > 0 ? `+${profile.clarityBoostDb}dB Air` : 'Neutral'}
+                          </span>
+                        </div>
+                        <span className="text-[10px] opacity-75 line-clamp-1">{profile.description}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Pitch Shift Envelope Slider */}
+                  <div className="space-y-1 pt-1">
+                    <div className="flex justify-between text-xs text-slate-300">
+                      <span>Pitch Shifter</span>
+                      <span className="font-mono text-indigo-300">
+                        {voicePitchSemitones > 0 ? `+${voicePitchSemitones} Semitones` : voicePitchSemitones < 0 ? `${voicePitchSemitones} Semitones` : '0 (Original)'}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={-12}
+                      max={12}
+                      step={1}
+                      value={voicePitchSemitones}
+                      onChange={(e) => setVoicePitchSemitones(parseInt(e.target.value, 10))}
+                      className="w-full accent-indigo-500"
+                    />
+                  </div>
                 </div>
               </div>
             )}
@@ -3620,6 +3726,75 @@ export default function ManualStudioPage() {
                     </div>
                   </div>
                 </div>
+
+                {/* AI Audio De-Clicker, Plosive Pop Filter & Vocal Air */}
+                <div className="p-3.5 rounded-2xl bg-cyan-950/20 border border-cyan-500/30 space-y-3 pt-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+                      <Volume2 className="w-3.5 h-3.5 text-cyan-400" /> Vocal De-Clicker & Pop Filter
+                    </span>
+                    <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono">
+                      85Hz + 12kHz DSP
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 leading-snug">
+                    Steep highpass plosive pop filter suppresses microphone breath blasts, while high-shelf air EQ injects crystal-clear broadcast sheen.
+                  </p>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between p-2 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+                      <span className="text-[11px] text-white font-medium">85Hz Plosive Pop Filter</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVocalEnhancerSettings(prev => ({ ...prev, plosiveFilterEnabled: !prev.plosiveFilterEnabled }));
+                          toast.success(vocalEnhancerSettings.plosiveFilterEnabled ? 'Pop Filter bypassed' : 'Pop Filter active');
+                        }}
+                        className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full transition-all ${
+                          vocalEnhancerSettings.plosiveFilterEnabled
+                            ? 'bg-cyan-500/30 text-cyan-300 border border-cyan-500/50'
+                            : 'bg-white/10 text-slate-400 border border-white/10'
+                        }`}
+                      >
+                        {vocalEnhancerSettings.plosiveFilterEnabled ? 'ON' : 'OFF'}
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+                      <span className="text-[11px] text-white font-medium">6.5kHz Mouth De-Clicker</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setVocalEnhancerSettings(prev => ({ ...prev, deClickerEnabled: !prev.deClickerEnabled }));
+                          toast.success(vocalEnhancerSettings.deClickerEnabled ? 'De-Clicker bypassed' : 'De-Clicker active');
+                        }}
+                        className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full transition-all ${
+                          vocalEnhancerSettings.deClickerEnabled
+                            ? 'bg-cyan-500/30 text-cyan-300 border border-cyan-500/50'
+                            : 'bg-white/10 text-slate-400 border border-white/10'
+                        }`}
+                      >
+                        {vocalEnhancerSettings.deClickerEnabled ? 'ON' : 'OFF'}
+                      </button>
+                    </div>
+
+                    <div className="space-y-1 pt-1">
+                      <div className="flex justify-between text-xs text-slate-300">
+                        <span>12kHz+ Vocal Air Sheen</span>
+                        <span className="font-mono text-cyan-400">+{vocalEnhancerSettings.vocalAirBoostDb.toFixed(1)} dB</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={10}
+                        step={0.5}
+                        value={vocalEnhancerSettings.vocalAirBoostDb}
+                        onChange={(e) => setVocalEnhancerSettings(prev => ({ ...prev, vocalAirBoostDb: parseFloat(e.target.value) }))}
+                        className="w-full accent-cyan-400"
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -4648,6 +4823,72 @@ export default function ManualStudioPage() {
                       className="w-full accent-amber-500"
                     />
                   </div>
+
+                  {/* Smart Video B-Roll Semantic Color Matcher & Grade Harmonizer */}
+                  <div className="p-3.5 rounded-2xl bg-gradient-to-br from-amber-950/20 to-purple-950/20 border border-amber-500/30 space-y-3 pt-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                        <Palette className="w-3.5 h-3.5 text-amber-400" /> B-Roll Color Harmonizer
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setHarmonizerSettings(prev => ({ ...prev, enabled: !prev.enabled }));
+                          toast.success(harmonizerSettings.enabled ? 'Harmonizer disabled' : 'Harmonizer enabled');
+                        }}
+                        className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full transition-all ${
+                          harmonizerSettings.enabled
+                            ? 'bg-amber-500/30 text-amber-300 border border-amber-500/50'
+                            : 'bg-white/10 text-slate-400 border border-white/10 hover:text-white'
+                        }`}
+                      >
+                        {harmonizerSettings.enabled ? 'HARMONIZED' : 'BYPASSED'}
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-snug">
+                      Analyzes master scene palette and automatically color-grades stock B-roll to match temperature, contrast, and luminance.
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {[
+                        { id: 'auto-match', name: 'Auto Tone Match', desc: 'Realtime palette match' },
+                        { id: 'golden-hour', name: 'Golden Hour', desc: 'Warm cinematic sunset' },
+                        { id: 'cyber-noir', name: 'Cyber Noir', desc: 'Teal/magenta split' },
+                        { id: 'clean-commercial', name: 'Commercial Clean', desc: 'Neutral skin balance' },
+                        { id: 'vintage-film', name: 'Vintage 35mm', desc: 'Matte blacks & warmth' },
+                      ].map(p => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => setHarmonizerSettings(prev => ({ ...prev, preset: p.id as HarmonizerPreset }))}
+                          className={`p-2 rounded-xl border text-xs text-left transition-all ${
+                            harmonizerSettings.preset === p.id
+                              ? 'bg-amber-500/25 border-amber-500 text-white font-bold'
+                              : 'bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          <div className="text-[11px] font-bold text-white truncate">{p.name}</div>
+                          <div className="text-[9px] opacity-70 truncate">{p.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="space-y-1 pt-1">
+                      <div className="flex justify-between text-xs text-slate-300">
+                        <span>Harmonization Intensity</span>
+                        <span className="font-mono text-amber-400">{Math.round(harmonizerSettings.intensity * 100)}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={harmonizerSettings.intensity}
+                        onChange={(e) => setHarmonizerSettings(prev => ({ ...prev, intensity: parseFloat(e.target.value) }))}
+                        className="w-full accent-amber-500"
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -5428,6 +5669,80 @@ export default function ManualStudioPage() {
                     </div>
                   );
                 })}
+
+              {/* Active Shoppable Hotspots & Interactive Product Overlay */}
+              {getActiveHotspots(studioHotspots, currentTime).map((spot) => {
+                const posClass =
+                  spot.position === 'top-right'
+                    ? 'top-6 right-6'
+                    : spot.position === 'bottom-right'
+                    ? 'bottom-16 right-6'
+                    : spot.position === 'center'
+                    ? 'top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2'
+                    : 'bottom-16 left-1/2 -translate-x-1/2';
+
+                return (
+                  <div
+                    key={spot.id}
+                    className={`absolute z-35 pointer-events-auto transition-all duration-300 animate-in zoom-in-90 ${posClass}`}
+                  >
+                  <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl p-2.5 shadow-2xl flex items-center gap-3 min-w-[200px] max-w-[280px]">
+                    {spot.imageUrl ? (
+                      <img
+                        src={spot.imageUrl}
+                        alt={spot.title}
+                        className="w-10 h-10 rounded-lg object-cover bg-slate-800 flex-shrink-0"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center flex-shrink-0">
+                        <Tag className="w-5 h-5" />
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-xs font-bold text-white truncate">{spot.title}</span>
+                        {spot.price && (
+                          <span className="text-[10px] font-extrabold text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                            {spot.price}
+                          </span>
+                        )}
+                      </div>
+                      {spot.description && (
+                        <p className="text-[10px] text-slate-400 truncate mt-0.5">{spot.description}</p>
+                      )}
+                      <div className="mt-1.5 flex items-center gap-2">
+                        {spot.couponCode && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              navigator.clipboard?.writeText(spot.couponCode || '');
+                              setCopiedStudioCoupon(spot.id);
+                              toast.success(`Copied coupon code ${spot.couponCode}!`);
+                              setTimeout(() => setCopiedStudioCoupon(null), 2000);
+                            }}
+                            className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1 hover:bg-amber-500/30 transition"
+                          >
+                            {copiedStudioCoupon === spot.id ? <Check className="w-2.5 h-2.5" /> : null}
+                            {copiedStudioCoupon === spot.id ? 'Copied' : spot.couponCode}
+                          </button>
+                        )}
+                        <a
+                          href={spot.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1 transition ml-auto"
+                        >
+                          <span>{spot.buttonText || 'Buy Now'}</span>
+                          <Share2 className="w-2.5 h-2.5" />
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
             </div>
           </div>
 
@@ -5940,6 +6255,38 @@ export default function ManualStudioPage() {
         hasOverlays={operations.some((op) => op.type === 'broll_clip' || op.type === 'overlay_image')}
         operationsCount={operations.length}
         onAutoOptimize={handleAutoEqualizePacing}
+      />
+
+      {/* Interactive Shoppable Product Hotspots & In-Video CTA Modal */}
+      <HotspotsStudioModal
+        isOpen={showHotspotsModal}
+        onClose={() => setShowHotspotsModal(false)}
+        hotspots={studioHotspots}
+        currentTime={currentTime}
+        duration={duration}
+        onSaveHotspots={(updated) => {
+          setStudioHotspots(updated);
+          toast.success(`Saved ${updated.length} interactive hotspots & CTAs!`);
+        }}
+      />
+
+      {/* Autonomous Multi-Hook Repurposing & Shorts Variant Modal */}
+      <RepurposerModal
+        isOpen={showRepurposerModal}
+        onClose={() => setShowRepurposerModal(false)}
+        sourceDuration={duration}
+        scriptText={subtitleText}
+        onApplyVariant={(variant: ShortsHookVariant) => {
+          setSubtitleText(variant.hookHeadline);
+          setSubtitleStyle(variant.recommendedSubtitleStyle);
+          setTrimEnd(Math.min(duration, variant.durationSeconds));
+          addOperation('repurpose_variant', `Shorts Hook: ${variant.name}`, {
+            angle: variant.angle,
+            platform: variant.targetPlatform,
+            pacing: variant.pacingPpm
+          });
+          toast.success(`Applied "${variant.name}" viral short cut (${variant.estimatedRetentionPct}% APV)!`);
+        }}
       />
     </div>
   );

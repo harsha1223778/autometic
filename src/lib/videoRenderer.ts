@@ -20,6 +20,7 @@ import { applyCameraAngleTransform } from './multiCamDirector';
 import { getKenBurnsTransform } from './kenBurnsDrift';
 import { calculateKineticTransform } from './kineticTypography';
 import { computeAutoTrackingCrop, generateSimulatedFacePath, TrackingFramingMode } from './faceTracker';
+import { HarmonizerSettings, analyzeSceneColor, applyHarmonizationFX } from './colorHarmonizer';
 
 export interface RenderOptions {
   videoElement: HTMLVideoElement | null;
@@ -68,6 +69,7 @@ export interface RenderOptions {
   musicVolume?: number;
   exportMatrix?: ExportMatrixSettings;
   customSubtitleStyling?: SubtitleStyling;
+  colorHarmonizer?: HarmonizerSettings;
   kineticPreset?: string;
   velocityTransitionType?: string;
   onProgress?: (progressPct: number, stage: string) => void;
@@ -439,6 +441,13 @@ export async function renderStudioComposition(options: RenderOptions): Promise<B
             ctx.shadowBlur = 16;
             ctx.drawImage(ov.el, ovX, ovY, ovW, ovH);
           }
+
+          // Smart Semantic Color Harmonization for overlays / B-roll
+          if (options.colorHarmonizer?.enabled) {
+            const stats = analyzeSceneColor(ctx, width, height, 32);
+            applyHarmonizationFX(ctx, ovX, ovY, ovW, ovH, stats, options.colorHarmonizer);
+          }
+
           ctx.restore();
         }
       }

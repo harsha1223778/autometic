@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams, useParams } from 'next/navigation';
-import { Play, Pause, Volume2, VolumeX, Mail, ArrowRight } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, Mail, ArrowRight, ShoppingBag, Tag, ExternalLink, Check } from 'lucide-react';
+import { VideoHotspotItem, getActiveHotspots, SAMPLE_HOTSPOTS } from '@/lib/videoHotspots';
 
 function EmbedPlayerContent() {
   const params = useParams();
@@ -24,6 +25,10 @@ function EmbedPlayerContent() {
   const [gateUnlocked, setGateUnlocked] = useState(false);
   const [gateActive, setGateActive] = useState(false);
   const [emailInput, setEmailInput] = useState('');
+  const [hotspots] = useState<VideoHotspotItem[]>(SAMPLE_HOTSPOTS);
+  const [copiedCoupon, setCopiedCoupon] = useState<string | null>(null);
+
+  const activeHotspots = getActiveHotspots(hotspots, currentTime);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -107,6 +112,78 @@ function EmbedPlayerContent() {
         <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
         <span className="font-bold">EditFlow AI</span>
       </div>
+
+      {/* Interactive Shoppable Product Hotspots & CTAs */}
+      {activeHotspots.map((spot) => {
+        const posClass =
+          spot.position === 'top-right'
+            ? 'top-6 right-6'
+            : spot.position === 'bottom-right'
+            ? 'bottom-16 right-6'
+            : spot.position === 'center'
+            ? 'top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2'
+            : 'bottom-16 left-1/2 -translate-x-1/2';
+
+        return (
+          <div
+            key={spot.id}
+            className={`absolute z-25 pointer-events-auto transition-all duration-300 animate-in zoom-in-90 ${posClass}`}
+          >
+            <div className="bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-xl p-2.5 shadow-2xl flex items-center gap-3 min-w-[200px] max-w-[280px]">
+              {spot.imageUrl ? (
+                <img
+                  src={spot.imageUrl}
+                  alt={spot.title}
+                  className="w-10 h-10 rounded-lg object-cover bg-slate-800 flex-shrink-0"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-lg bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center flex-shrink-0">
+                  {spot.type === 'product_card' ? <ShoppingBag className="w-5 h-5" /> : <Tag className="w-5 h-5" />}
+                </div>
+              )}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-xs font-bold text-white truncate">{spot.title}</span>
+                {spot.price && (
+                  <span className="text-[10px] font-extrabold text-emerald-400 bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                    {spot.price}
+                  </span>
+                )}
+              </div>
+              {spot.description && (
+                <p className="text-[10px] text-slate-400 truncate mt-0.5">{spot.description}</p>
+              )}
+              <div className="mt-1.5 flex items-center gap-2">
+                {spot.couponCode ? (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      navigator.clipboard?.writeText(spot.couponCode || '');
+                      setCopiedCoupon(spot.id);
+                      setTimeout(() => setCopiedCoupon(null), 2000);
+                    }}
+                    className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1 hover:bg-amber-500/30 transition"
+                  >
+                    {copiedCoupon === spot.id ? <Check className="w-2.5 h-2.5" /> : null}
+                    {copiedCoupon === spot.id ? 'Copied!' : spot.couponCode}
+                  </button>
+                ) : null}
+                <a
+                  href={spot.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-600 hover:bg-indigo-500 text-white flex items-center gap-1 transition ml-auto"
+                >
+                  <span>{spot.buttonText || 'View'}</span>
+                  <ExternalLink className="w-2.5 h-2.5" />
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    })}
 
       {/* Lead Capture Gate Overlay */}
       {gateActive && (
